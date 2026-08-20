@@ -7,8 +7,8 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-adguardhome
 PKG_MAINTAINER:=kenzok8
-PKG_VERSION:=1.0
-PKG_RELEASE:=9
+PKG_VERSION:=2026.08.20
+PKG_RELEASE:=1
 
 LUCI_TITLE:=LuCI app for AdGuardHome
 LUCI_PKGARCH:=all
@@ -76,4 +76,4 @@ endef
 include $(TOPDIR)/feeds/luci/luci.mk
 
 # call BuildPackage - OpenWrt buildroot signature
-$(eval $(call BuildPackage,luci-app-adguardhome))
+# $(eval $(call BuildPackage,luci-app-adguardhome))
