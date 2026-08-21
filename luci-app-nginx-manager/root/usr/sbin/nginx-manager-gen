@@ -445,9 +445,119 @@ generate_custom_location_directives() {
 	printf '%s\n' "${custom_directives}" | sed 's/^/        /'
 }
 
+_ADDITIONAL_LOCATION_SITE=""
+_ADDITIONAL_LOCATION_PROXY_HOST=""
+_ADDITIONAL_LOCATION_PROXY_XFF=""
+_ADDITIONAL_LOCATION_PROXY_XFP=""
+_ADDITIONAL_LOCATION_PROXY_XRI=""
+_ADDITIONAL_LOCATION_CONNECT_TIMEOUT=""
+_ADDITIONAL_LOCATION_READ_TIMEOUT=""
+_ADDITIONAL_LOCATION_SEND_TIMEOUT=""
+
+generate_additional_proxy_location() {
+	local location_section="$1" site location_format path proxy_pass websocket directives
+	config_get site "${location_section}" site
+	[ "${site}" = "${_ADDITIONAL_LOCATION_SITE}" ] || return 0
+	config_get location_format "${location_section}" format "v1"
+	[ "${location_format}" = "v1" ] || return 0
+	config_get path "${location_section}" path
+	config_get proxy_pass "${location_section}" proxy_pass
+	config_get websocket "${location_section}" websocket "0"
+	config_get directives "${location_section}" directives ""
+	[ -n "${path}" ] && [ -n "${proxy_pass}" ] || return 0
+
+	echo ""
+	echo "    location ^~ ${path} {"
+	[ "${websocket}" != "1" ] && echo "        proxy_http_version 1.1;"
+	echo "        proxy_pass ${proxy_pass};"
+	generate_proxy_headers "${_ADDITIONAL_LOCATION_PROXY_HOST}" "${_ADDITIONAL_LOCATION_PROXY_XFF}" "${_ADDITIONAL_LOCATION_PROXY_XFP}" "${_ADDITIONAL_LOCATION_PROXY_XRI}"
+	[ "${websocket}" != "1" ] && echo "        proxy_set_header Connection \"\";"
+	[ -n "${_ADDITIONAL_LOCATION_CONNECT_TIMEOUT}" ] && echo "        proxy_connect_timeout ${_ADDITIONAL_LOCATION_CONNECT_TIMEOUT};"
+	[ -n "${_ADDITIONAL_LOCATION_READ_TIMEOUT}" ] && echo "        proxy_read_timeout ${_ADDITIONAL_LOCATION_READ_TIMEOUT};"
+	[ -n "${_ADDITIONAL_LOCATION_SEND_TIMEOUT}" ] && echo "        proxy_send_timeout ${_ADDITIONAL_LOCATION_SEND_TIMEOUT};"
+	[ "${websocket}" = "1" ] && generate_websocket_headers
+	generate_custom_location_directives "${directives}"
+	echo "    }"
+}
+
+generate_additional_proxy_locations() {
+	_ADDITIONAL_LOCATION_SITE="$1"
+	_ADDITIONAL_LOCATION_PROXY_HOST="$2"
+	_ADDITIONAL_LOCATION_PROXY_XFF="$3"
+	_ADDITIONAL_LOCATION_PROXY_XFP="$4"
+	_ADDITIONAL_LOCATION_PROXY_XRI="$5"
+	_ADDITIONAL_LOCATION_CONNECT_TIMEOUT="$6"
+	_ADDITIONAL_LOCATION_READ_TIMEOUT="$7"
+	_ADDITIONAL_LOCATION_SEND_TIMEOUT="$8"
+	config_foreach generate_additional_proxy_location location
+}
+
+_PROXY_LOCATION_SITE=""
+_PROXY_LOCATION_CONNECT_TIMEOUT=""
+_PROXY_LOCATION_READ_TIMEOUT=""
+_PROXY_LOCATION_SEND_TIMEOUT=""
+_HAS_PROXY_LOCATION_V2="0"
+
+has_proxy_location_v2() {
+	local location_section="$1" site location_format
+	config_get site "${location_section}" site
+	[ "${site}" = "${_PROXY_LOCATION_SITE}" ] || return 0
+	config_get location_format "${location_section}" format "v1"
+	[ "${location_format}" = "v2" ] && _HAS_PROXY_LOCATION_V2="1"
+}
+
+generate_proxy_location_v2() {
+	local location_section="$1" site location_format path proxy_pass websocket proxy_host proxy_xff proxy_xfp proxy_xri directives
+	config_get site "${location_section}" site
+	[ "${site}" = "${_PROXY_LOCATION_SITE}" ] || return 0
+	config_get location_format "${location_section}" format "v1"
+	[ "${location_format}" = "v2" ] || return 0
+	config_get path "${location_section}" path
+	config_get proxy_pass "${location_section}" proxy_pass
+	config_get websocket "${location_section}" websocket "0"
+	config_get proxy_host "${location_section}" proxy_host "1"
+	config_get proxy_xff "${location_section}" proxy_xff "1"
+	config_get proxy_xfp "${location_section}" proxy_xfp "1"
+	config_get proxy_xri "${location_section}" proxy_xri "1"
+	config_get directives "${location_section}" directives ""
+	[ -n "${path}" ] && [ -n "${proxy_pass}" ] || return 0
+
+	echo ""
+	echo "    location ${path} {"
+	case "${proxy_pass}" in
+		grpc://*|grpcs://*)
+			echo "        grpc_pass ${proxy_pass};"
+			generate_grpc_headers "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}"
+			[ -n "${_PROXY_LOCATION_CONNECT_TIMEOUT}" ] && echo "        grpc_connect_timeout ${_PROXY_LOCATION_CONNECT_TIMEOUT};"
+			[ -n "${_PROXY_LOCATION_READ_TIMEOUT}" ] && echo "        grpc_read_timeout ${_PROXY_LOCATION_READ_TIMEOUT};"
+			[ -n "${_PROXY_LOCATION_SEND_TIMEOUT}" ] && echo "        grpc_send_timeout ${_PROXY_LOCATION_SEND_TIMEOUT};"
+			;;
+		*)
+			[ "${websocket}" != "1" ] && echo "        proxy_http_version 1.1;"
+			echo "        proxy_pass ${proxy_pass};"
+			generate_proxy_headers "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}"
+			[ "${websocket}" != "1" ] && echo "        proxy_set_header Connection \"\";"
+			[ -n "${_PROXY_LOCATION_CONNECT_TIMEOUT}" ] && echo "        proxy_connect_timeout ${_PROXY_LOCATION_CONNECT_TIMEOUT};"
+			[ -n "${_PROXY_LOCATION_READ_TIMEOUT}" ] && echo "        proxy_read_timeout ${_PROXY_LOCATION_READ_TIMEOUT};"
+			[ -n "${_PROXY_LOCATION_SEND_TIMEOUT}" ] && echo "        proxy_send_timeout ${_PROXY_LOCATION_SEND_TIMEOUT};"
+			[ "${websocket}" = "1" ] && generate_websocket_headers
+			;;
+	esac
+	generate_custom_location_directives "${directives}"
+	echo "    }"
+}
+
+generate_proxy_locations_v2() {
+	_PROXY_LOCATION_SITE="$1"
+	_PROXY_LOCATION_CONNECT_TIMEOUT="$2"
+	_PROXY_LOCATION_READ_TIMEOUT="$3"
+	_PROXY_LOCATION_SEND_TIMEOUT="$4"
+	config_foreach generate_proxy_location_v2 location
+}
+
 generate_reverse_proxy_site() {
 	local section="$1"
-	local name server_name proxy_pass websocket redirect_https
+	local name server_name proxy_path proxy_pass websocket redirect_https
 	local proxy_host proxy_xff proxy_xfp proxy_xri
 	local ssl_cert access_log error_log enabled
 	local proxy_type custom_proxy_headers listen_addr listen_port
@@ -456,6 +566,7 @@ generate_reverse_proxy_site() {
 
 	name="$(uci -q get "nginx_manager.${section}.name")" || name="${section}"
 	server_name="$(uci -q get "nginx_manager.${section}.server_name")" || return 1
+	proxy_path="$(uci -q get "nginx_manager.${section}.proxy_path")" || proxy_path="/"
 	proxy_pass="$(uci -q get "nginx_manager.${section}.proxy_pass")" || return 1
 	websocket="$(uci -q get "nginx_manager.${section}.websocket")" || websocket="0"
 	redirect_https="$(uci -q get "nginx_manager.${section}.redirect_https")" || redirect_https="0"
@@ -478,6 +589,9 @@ generate_reverse_proxy_site() {
 	grpc_path="$(uci -q get "nginx_manager.${section}.grpc_path")" || grpc_path=""
 	grpc_pass="$(uci -q get "nginx_manager.${section}.grpc_pass")" || grpc_pass=""
 	http3="$(uci -q get nginx_manager.global.http3)" || http3=""
+	_PROXY_LOCATION_SITE="${section}"
+	_HAS_PROXY_LOCATION_V2="0"
+	config_foreach has_proxy_location_v2 location
 
 	local output_file="${BUILD_DIR}/${name}.conf"
 	{
@@ -509,37 +623,42 @@ generate_reverse_proxy_site() {
 			echo "    }"
 		fi
 
-		echo ""
-		echo "    location / {"
-
-		if [ "${proxy_type}" = "grpc" ]; then
-			echo "        grpc_pass ${proxy_pass};"
-			generate_grpc_headers "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}"
-			[ -n "${proxy_connect_timeout}" ] && echo "        grpc_connect_timeout ${proxy_connect_timeout};"
-			[ -n "${proxy_read_timeout}" ] && echo "        grpc_read_timeout ${proxy_read_timeout};"
-			[ -n "${proxy_send_timeout}" ] && echo "        grpc_send_timeout ${proxy_send_timeout};"
+		if [ "${_HAS_PROXY_LOCATION_V2}" = "1" ]; then
+			generate_proxy_locations_v2 "${section}" "${proxy_connect_timeout}" "${proxy_read_timeout}" "${proxy_send_timeout}"
 		else
-			if [ "${websocket}" != "1" ] && [ "${proxy_type}" != "websocket" ]; then
-				echo "        proxy_http_version 1.1;"
+			echo ""
+			echo "    location ${proxy_path} {"
+
+			if [ "${proxy_type}" = "grpc" ]; then
+				echo "        grpc_pass ${proxy_pass};"
+				generate_grpc_headers "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}"
+				[ -n "${proxy_connect_timeout}" ] && echo "        grpc_connect_timeout ${proxy_connect_timeout};"
+				[ -n "${proxy_read_timeout}" ] && echo "        grpc_read_timeout ${proxy_read_timeout};"
+				[ -n "${proxy_send_timeout}" ] && echo "        grpc_send_timeout ${proxy_send_timeout};"
+			else
+				if [ "${websocket}" != "1" ] && [ "${proxy_type}" != "websocket" ]; then
+					echo "        proxy_http_version 1.1;"
+				fi
+				echo "        proxy_pass ${proxy_pass};"
+				generate_proxy_headers "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}"
+				echo "        proxy_set_header Connection \"\";"
+				[ -n "${proxy_connect_timeout}" ] && echo "        proxy_connect_timeout ${proxy_connect_timeout};"
+				[ -n "${proxy_read_timeout}" ] && echo "        proxy_read_timeout ${proxy_read_timeout};"
+				[ -n "${proxy_send_timeout}" ] && echo "        proxy_send_timeout ${proxy_send_timeout};"
+
+				if [ "${websocket}" = "1" ] || [ "${proxy_type}" = "websocket" ]; then
+					generate_websocket_headers
+				fi
 			fi
-			echo "        proxy_pass ${proxy_pass};"
-			generate_proxy_headers "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}"
-			echo "        proxy_set_header Connection \"\";"
-			[ -n "${proxy_connect_timeout}" ] && echo "        proxy_connect_timeout ${proxy_connect_timeout};"
-			[ -n "${proxy_read_timeout}" ] && echo "        proxy_read_timeout ${proxy_read_timeout};"
-			[ -n "${proxy_send_timeout}" ] && echo "        proxy_send_timeout ${proxy_send_timeout};"
 
-			if [ "${websocket}" = "1" ] || [ "${proxy_type}" = "websocket" ]; then
-				generate_websocket_headers
-			fi
-		fi
+			generate_custom_location_directives "${custom_proxy_headers}"
 
-		generate_custom_location_directives "${custom_proxy_headers}"
+			echo "    }"
+			generate_additional_proxy_locations "${section}" "${proxy_host}" "${proxy_xff}" "${proxy_xfp}" "${proxy_xri}" \
+				"${proxy_connect_timeout}" "${proxy_read_timeout}" "${proxy_send_timeout}"
 
-		echo "    }"
-
-		# gRPC Passthrough: when proxy_type=http and grpc_path/grpc_pass are set
-		if [ "${proxy_type}" = "http" ] && [ -n "${grpc_path}" ] && [ -n "${grpc_pass}" ]; then
+			# gRPC Passthrough: when proxy_type=http and grpc_path/grpc_pass are set
+			if [ "${proxy_type}" = "http" ] && [ -n "${grpc_path}" ] && [ -n "${grpc_pass}" ]; then
 			echo ""
 			echo "    location ${grpc_path} {"
 			echo "        grpc_pass ${grpc_pass};"
@@ -548,6 +667,7 @@ generate_reverse_proxy_site() {
 			[ -n "${proxy_read_timeout}" ] && echo "        grpc_read_timeout ${proxy_read_timeout};"
 			[ -n "${proxy_send_timeout}" ] && echo "        grpc_send_timeout ${proxy_send_timeout};"
 			echo "    }"
+			fi
 		fi
 
 		echo "}"

@@ -100,6 +100,126 @@ validate_acme_credential() {
 	echo "$1" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*=.+$'
 }
 
+validate_proxy_location_path() {
+	printf '%s\n' "$1" | grep -qE '^/[A-Za-z0-9._~!$&()*+,;=:@%/-]*$'
+}
+
+validate_proxy_location_backend() {
+	case "$1" in
+		http://*|https://*|unix:*|grpc://*|grpcs://*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+validate_proxy_location_directives() {
+	# The frontend sends UTF-8 bytes as hexadecimal. Do not depend on a base64
+	# applet: it is absent from some minimal OpenWrt images.
+	printf '%s\n' "$1" | grep -qE '^([0-9A-Fa-f][0-9A-Fa-f])*$'
+}
+
+decode_proxy_location_directives() {
+	# Input is validated hexadecimal, so this only produces \xHH escapes for
+	# BusyBox printf and cannot introduce a shell escape sequence.
+	printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"
+}
+
+validate_proxy_locations() {
+	local locations="$1" seen_paths=""
+	[ -z "${locations}" ] && return 0
+	printf '%s\n' "${locations}" | while IFS='|' read -r location_path location_backend location_websocket location_proxy_host location_proxy_xff location_proxy_xfp location_proxy_xri location_directives extra; do
+		location_path="$(printf '%s' "${location_path}" | tr -d '\r')"
+		[ -z "${location_path}${location_backend}${location_websocket}${location_proxy_host}${location_proxy_xff}${location_proxy_xfp}${location_proxy_xri}${location_directives}${extra}" ] && continue
+		[ -z "${extra}" ] || exit 1
+		validate_proxy_location_path "${location_path}" || exit 1
+		printf '%s\n' "${seen_paths}" | grep -Fqx "${location_path}" && exit 1
+		seen_paths="${seen_paths}
+${location_path}"
+		validate_proxy_location_backend "${location_backend}" || exit 1
+		case "${location_websocket}" in 0|1) ;; *) exit 1 ;; esac
+		case "${location_proxy_host}" in 0|1) ;; *) exit 1 ;; esac
+		case "${location_proxy_xff}" in 0|1) ;; *) exit 1 ;; esac
+		case "${location_proxy_xfp}" in 0|1) ;; *) exit 1 ;; esac
+		case "${location_proxy_xri}" in 0|1) ;; *) exit 1 ;; esac
+		[ -z "${location_directives}" ] || validate_proxy_location_directives "${location_directives}" || exit 1
+	done
+}
+
+_PROXY_LOCATION_SITE=""
+_delete_proxy_location() {
+	local section="$1" owner
+	config_get owner "${section}" site
+	[ "${owner}" = "${_PROXY_LOCATION_SITE}" ] && uci -q delete "nginx_manager.${section}"
+}
+
+delete_proxy_locations() {
+	_PROXY_LOCATION_SITE="$1"
+	config_foreach _delete_proxy_location location
+}
+
+store_proxy_locations() {
+	local site_id="$1" locations="$2"
+	local location_path location_backend location_websocket location_proxy_host location_proxy_xff location_proxy_xfp location_proxy_xri location_directives extra location_section
+
+	# config_foreach operates on the shell's loaded UCI view. Reload it here so
+	# a save replaces previously stored locations instead of appending duplicates.
+	config_load nginx_manager
+	delete_proxy_locations "${site_id}"
+	[ -z "${locations}" ] && return 0
+
+	printf '%s\n' "${locations}" | while IFS='|' read -r location_path location_backend location_websocket location_proxy_host location_proxy_xff location_proxy_xfp location_proxy_xri location_directives extra; do
+		location_path="$(printf '%s' "${location_path}" | tr -d '\r')"
+		[ -z "${location_path}${location_backend}${location_websocket}" ] && continue
+		location_section="$(uci add nginx_manager location)"
+		uci set "nginx_manager.${location_section}.site=${site_id}"
+		uci set "nginx_manager.${location_section}.format=v2"
+		uci set "nginx_manager.${location_section}.path=${location_path}"
+		uci set "nginx_manager.${location_section}.proxy_pass=${location_backend}"
+		uci set "nginx_manager.${location_section}.websocket=${location_websocket}"
+		uci set "nginx_manager.${location_section}.proxy_host=${location_proxy_host}"
+		uci set "nginx_manager.${location_section}.proxy_xff=${location_proxy_xff}"
+		uci set "nginx_manager.${location_section}.proxy_xfp=${location_proxy_xfp}"
+		uci set "nginx_manager.${location_section}.proxy_xri=${location_proxy_xri}"
+		if [ -n "${location_directives}" ]; then
+			location_directives="$(decode_proxy_location_directives "${location_directives}")"
+			uci set "nginx_manager.${location_section}.directives=${location_directives}"
+		fi
+	done
+}
+
+_COPY_PROXY_LOCATION_SOURCE=""
+_COPY_PROXY_LOCATION_DESTINATION=""
+_copy_proxy_location() {
+	local section="$1" site location_path location_backend location_websocket location_proxy_host location_proxy_xff location_proxy_xfp location_proxy_xri location_directives location_section
+	config_get site "${section}" site
+	[ "${site}" = "${_COPY_PROXY_LOCATION_SOURCE}" ] || return 0
+	config_get location_path "${section}" path
+	config_get location_backend "${section}" proxy_pass
+	config_get location_websocket "${section}" websocket "0"
+	config_get location_proxy_host "${section}" proxy_host "1"
+	config_get location_proxy_xff "${section}" proxy_xff "1"
+	config_get location_proxy_xfp "${section}" proxy_xfp "1"
+	config_get location_proxy_xri "${section}" proxy_xri "1"
+	config_get location_directives "${section}" directives ""
+	[ -n "${location_path}" ] && [ -n "${location_backend}" ] || return 0
+	location_section="$(uci add nginx_manager location)"
+	uci set "nginx_manager.${location_section}.site=${_COPY_PROXY_LOCATION_DESTINATION}"
+	uci set "nginx_manager.${location_section}.format=v2"
+	uci set "nginx_manager.${location_section}.path=${location_path}"
+	uci set "nginx_manager.${location_section}.proxy_pass=${location_backend}"
+	uci set "nginx_manager.${location_section}.websocket=${location_websocket}"
+	uci set "nginx_manager.${location_section}.proxy_host=${location_proxy_host}"
+	uci set "nginx_manager.${location_section}.proxy_xff=${location_proxy_xff}"
+	uci set "nginx_manager.${location_section}.proxy_xfp=${location_proxy_xfp}"
+	uci set "nginx_manager.${location_section}.proxy_xri=${location_proxy_xri}"
+	[ -n "${location_directives}" ] && uci set "nginx_manager.${location_section}.directives=${location_directives}"
+}
+
+copy_proxy_locations() {
+	_COPY_PROXY_LOCATION_SOURCE="$1"
+	_COPY_PROXY_LOCATION_DESTINATION="$2"
+	config_foreach _copy_proxy_location location
+}
+
 # Keep the global DNS credential store deliberately small and explicit. Apart
 # from making the UI predictable, this prevents an RPC caller from creating
 # arbitrary UCI options through the credentials parameter.
@@ -353,7 +473,7 @@ handle_get_site() {
 	fi
 
 	local opt
-	for opt in name mode server_name listen_addr listen_port proxy_pass root index websocket proxy_type grpc_path grpc_pass custom_proxy_headers redirect_https redirect_http_port \
+	for opt in name mode server_name listen_addr listen_port proxy_path proxy_pass root index websocket proxy_type grpc_path grpc_pass custom_proxy_headers redirect_https redirect_http_port \
 		proxy_host proxy_xff proxy_xfp proxy_xri ssl_cert ssl_protocols ssl_ciphers hsts_max_age \
 		access_log error_log \
 		custom_server_block redirect_target enabled \
@@ -362,6 +482,11 @@ handle_get_site() {
 		val="$(uci -q get "nginx_manager.${site_id}.${opt}")" || continue
 		json_add_string "${opt}" "${val}"
 	done
+
+	json_add_array "locations"
+	_PROXY_LOCATION_SITE="${site_id}"
+	config_foreach _get_site_proxy_location location
+	json_close_array
 
 	# Backward compatibility: migrate old listen list to listen_addr/listen_port
 	local listen_addr_exists listen_port_exists
@@ -395,6 +520,33 @@ handle_get_site() {
 	json_dump
 }
 
+_get_site_proxy_location() {
+	local section="$1" owner location_path location_backend location_websocket location_proxy_host location_proxy_xff location_proxy_xfp location_proxy_xri location_directives location_format
+	config_get owner "${section}" site
+	[ "${owner}" = "${_PROXY_LOCATION_SITE}" ] || return 0
+	config_get location_path "${section}" path
+	config_get location_backend "${section}" proxy_pass
+	config_get location_websocket "${section}" websocket "0"
+	config_get location_proxy_host "${section}" proxy_host "1"
+	config_get location_proxy_xff "${section}" proxy_xff "1"
+	config_get location_proxy_xfp "${section}" proxy_xfp "1"
+	config_get location_proxy_xri "${section}" proxy_xri "1"
+	config_get location_directives "${section}" directives ""
+	config_get location_format "${section}" format "v1"
+	[ -n "${location_path}" ] && [ -n "${location_backend}" ] || return 0
+	json_add_object ""
+	json_add_string "path" "${location_path}"
+	json_add_string "proxy_pass" "${location_backend}"
+	json_add_string "websocket" "${location_websocket}"
+	json_add_string "proxy_host" "${location_proxy_host}"
+	json_add_string "proxy_xff" "${location_proxy_xff}"
+	json_add_string "proxy_xfp" "${location_proxy_xfp}"
+	json_add_string "proxy_xri" "${location_proxy_xri}"
+	json_add_string "format" "${location_format}"
+	json_add_string "directives" "${location_directives}"
+	json_close_object
+}
+
 _collect_listen() {
 	if [ "${listen_found}" = "1" ]; then
 		listen_vals="${listen_vals},$1"
@@ -405,11 +557,11 @@ _collect_listen() {
 }
 
 handle_set_site() {
-	local site_id name mode server_name proxy_pass root index
+	local site_id name mode server_name proxy_path proxy_pass root index
 	local websocket proxy_type custom_proxy_headers redirect_https redirect_http_port proxy_host proxy_xff proxy_xfp proxy_xri
 	local ssl_cert ssl_protocols ssl_ciphers hsts_max_age access_log error_log custom_server_block redirect_target enabled
 	local listen_addr listen_port grpc_path grpc_pass
-	local proxy_connect_timeout proxy_read_timeout proxy_send_timeout
+	local proxy_connect_timeout proxy_read_timeout proxy_send_timeout locations
 
 	json_get_var site_id "id"
 	json_get_var name "name"
@@ -417,6 +569,7 @@ handle_set_site() {
 	json_get_var server_name "server_name"
 	json_get_var listen_addr "listen_addr"
 	json_get_var listen_port "listen_port"
+	json_get_var proxy_path "proxy_path"
 	json_get_var proxy_pass "proxy_pass"
 	json_get_var root "root"
 	json_get_var index "index"
@@ -443,6 +596,7 @@ handle_set_site() {
 	json_get_var proxy_connect_timeout "proxy_connect_timeout"
 	json_get_var proxy_read_timeout "proxy_read_timeout"
 	json_get_var proxy_send_timeout "proxy_send_timeout"
+	json_get_var locations "locations"
 
 	[ -z "${site_id}" ] && { json_init; json_add_string "error" "missing id"; json_dump; return; }
 	validate_uci_id "${site_id}" || { json_init; json_add_string "error" "invalid site id"; json_dump; return; }
@@ -493,6 +647,9 @@ handle_set_site() {
 			*) { json_init; json_add_string "error" "invalid proxy_pass"; json_dump; return; } ;;
 		esac
 	fi
+	[ -z "${proxy_path}" ] && proxy_path="/"
+	validate_proxy_location_path "${proxy_path}" || { json_init; json_add_string "error" "invalid proxy location path"; json_dump; return; }
+	validate_proxy_locations "${locations}" || { json_init; json_add_string "error" "invalid proxy location"; json_dump; return; }
 
 	validate_proxy_timeout "proxy_connect_timeout" "${proxy_connect_timeout}" || return
 	validate_proxy_timeout "proxy_read_timeout" "${proxy_read_timeout}" || return
@@ -530,6 +687,7 @@ handle_set_site() {
 	uci set "nginx_manager.${site_id}.name=${name}"
 	[ -n "${mode}" ] && uci set "nginx_manager.${site_id}.mode=${mode}"
 	[ -n "${server_name}" ] && uci set "nginx_manager.${site_id}.server_name=${server_name}"
+	uci set "nginx_manager.${site_id}.proxy_path=${proxy_path}"
 	[ -n "${proxy_pass}" ] && uci set "nginx_manager.${site_id}.proxy_pass=${proxy_pass}"
 	[ -n "${root}" ] && uci set "nginx_manager.${site_id}.root=${root}"
 	[ -n "${index}" ] && uci set "nginx_manager.${site_id}.index=${index}"
@@ -569,6 +727,7 @@ handle_set_site() {
 	# Set listen_addr and listen_port (allow empty listen_addr for all-interfaces)
 	uci set "nginx_manager.${site_id}.listen_addr=${listen_addr:-}"
 	uci set "nginx_manager.${site_id}.listen_port=${listen_port:-80}"
+	store_proxy_locations "${site_id}" "${locations}"
 
 	uci commit nginx_manager
 
@@ -602,6 +761,8 @@ handle_delete_site() {
 		return
 	}
 
+	config_load nginx_manager
+	delete_proxy_locations "${site_id}"
 	uci delete "nginx_manager.${site_id}"
 	uci commit nginx_manager
 
@@ -691,7 +852,7 @@ handle_duplicate_site() {
 	uci set "nginx_manager.${new_id}.name=${new_name}"
 
 	local opt val
-	for opt in mode server_name listen_addr listen_port proxy_pass root index websocket proxy_type grpc_path grpc_pass custom_proxy_headers redirect_https redirect_http_port \
+	for opt in mode server_name listen_addr listen_port proxy_path proxy_pass root index websocket proxy_type grpc_path grpc_pass custom_proxy_headers redirect_https redirect_http_port \
 		proxy_host proxy_xff proxy_xfp proxy_xri ssl_cert ssl_protocols ssl_ciphers hsts_max_age \
 		access_log error_log \
 		custom_server_block redirect_target \
@@ -702,6 +863,8 @@ handle_duplicate_site() {
 
 	# Set enabled=0 (disabled by default to avoid conflicts)
 	uci set "nginx_manager.${new_id}.enabled=0"
+	config_load nginx_manager
+	copy_proxy_locations "${site_id}" "${new_id}"
 
 	uci commit nginx_manager
 
@@ -3070,6 +3233,7 @@ case "$1" in
 		json_add_string "server_name" ""
 		json_add_string "listen_addr" ""
 		json_add_string "listen_port" ""
+		json_add_string "proxy_path" ""
 		json_add_string "proxy_pass" ""
 		json_add_string "root" ""
 		json_add_string "index" ""
@@ -3096,6 +3260,7 @@ case "$1" in
 		json_add_string "proxy_connect_timeout" ""
 		json_add_string "proxy_read_timeout" ""
 		json_add_string "proxy_send_timeout" ""
+		json_add_string "locations" ""
 		json_close_object
 
 		json_add_object "delete_site"

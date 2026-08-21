@@ -1712,3 +1712,45 @@ msgstr "Credentials Provider"
 
 msgid "private key file not found"
 msgstr "private key file not found"
+
+msgid "Additional Locations"
+msgstr "Additional Locations"
+
+msgid "Route a path prefix to another HTTP(S) or Unix-socket backend. The main backend continues to serve /."
+msgstr "Route a path prefix to another HTTP(S) or Unix-socket backend. The main backend continues to serve /."
+
+msgid "Add Location"
+msgstr "Add Location"
+
+msgid "Remove"
+msgstr "Remove"
+
+msgid "Each additional location needs a non-root path and backend address"
+msgstr "Each additional location needs a non-root path and backend address"
+
+msgid "Additional location backend must use http://, https://, or unix:"
+msgstr "Additional location backend must use http://, https://, or unix:"
+
+msgid "invalid additional proxy location"
+msgstr "invalid additional proxy location"
+
+msgid "Each card is one nginx location. Configure its path, backend, WebSocket, common headers, and any location-specific directives independently."
+msgstr "Each card is one nginx location. Configure its path, backend, WebSocket, common headers, and any location-specific directives independently."
+
+msgid "Headers:"
+msgstr "Headers:"
+
+msgid "Host"
+msgstr "Host"
+
+msgid "Location backend must use http://, https://, unix:, grpc://, or grpcs://"
+msgstr "Location backend must use http://, https://, unix:, grpc://, or grpcs://"
+
+msgid "Location Directives"
+msgstr "Location Directives"
+
+msgid "Added only to this location. Use proxy_set_header, client_max_body_size, timeouts, and other location directives."
+msgstr "Added only to this location. Use proxy_set_header, client_max_body_size, timeouts, and other location directives."
+
+msgid "Disable a common header here before redefining that same header in Location Directives."
+msgstr "Disable a common header here before redefining that same header in Location Directives."

@@ -298,6 +298,90 @@ body.nm-dark .nm-log-area.is-error {
 	margin: 0;
 }
 
+/* === Site editor: compact controls that retain the active LuCI theme === */
+.nm-site-edit .cbi-value {
+	margin-bottom: 0.65em;
+}
+.nm-site-edit .cbi-input-select {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 24em;
+	min-height: 2.35em;
+	margin: 0.15em 0;
+	padding: 0.42em 2.1em 0.42em 0.65em;
+	border-radius: 6px;
+}
+.nm-site-edit .nm-location-card {
+	box-sizing: border-box;
+	border: 1px solid var(--border-color, #d8d8d8);
+	border-radius: 8px;
+	background: var(--card-background-color, rgba(127, 127, 127, 0.035));
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.nm-site-edit .nm-location-card:hover {
+	border-color: var(--main-color, #337ab7);
+}
+.nm-site-edit .nm-location-top-row {
+	display: flex;
+	align-items: flex-end;
+	gap: 0.7em;
+	flex-wrap: wrap;
+}
+.nm-site-edit .nm-location-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4em;
+	box-sizing: border-box;
+	height: 2.3em;
+	margin: 0;
+	padding: 0.35em 0.6em;
+	border: 1px solid var(--border-color, #d8d8d8);
+	border-radius: 6px;
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
+}
+.nm-site-edit .nm-location-websocket {
+	margin-bottom: 0.05em;
+}
+.nm-site-edit .nm-location-header-row {
+	display: flex;
+	align-items: center;
+	gap: 0.55em;
+	flex-wrap: wrap;
+	margin-top: 0.65em;
+	padding-top: 0.6em;
+	border-top: 1px solid var(--border-color, #e4e4e4);
+}
+.nm-site-edit .nm-location-header-row > span {
+	margin-right: 0.1em;
+	font-weight: 600;
+}
+.nm-site-edit .nm-location-toggle .cbi-input-checkbox {
+	width: 1em;
+	height: 1em;
+	margin: 0;
+}
+.nm-site-edit .nm-location-card .cbi-input-text,
+.nm-site-edit .nm-location-card .cbi-input-textarea {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 0;
+}
+.nm-site-edit .nm-location-card summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+.nm-site-edit .nm-location-card details[open] summary {
+	margin-bottom: 0.35em;
+}
+@media (max-width: 640px) {
+	.nm-site-edit .cbi-input-select {
+		max-width: none;
+	}
+}
+
 /* === DNS Credential Sub-fields === */
 .nm-cred-field {
 	margin-bottom: 0.6em;

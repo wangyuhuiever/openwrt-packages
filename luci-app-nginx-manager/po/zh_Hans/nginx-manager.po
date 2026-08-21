@@ -1712,3 +1712,45 @@ msgstr "凭据配置供应商"
 
 msgid "private key file not found"
 msgstr "私钥文件未找到"
+
+msgid "Additional Locations"
+msgstr "附加 Location"
+
+msgid "Route a path prefix to another HTTP(S) or Unix-socket backend. The main backend continues to serve /."
+msgstr "将路径前缀代理到另一个 HTTP(S) 或 Unix Socket 后端；主后端继续处理 /。"
+
+msgid "Add Location"
+msgstr "添加 Location"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Each additional location needs a non-root path and backend address"
+msgstr "每个附加 Location 都需要非根路径和后端地址"
+
+msgid "Additional location backend must use http://, https://, or unix:"
+msgstr "附加 Location 后端必须使用 http://、https:// 或 unix:"
+
+msgid "invalid additional proxy location"
+msgstr "无效的附加代理 Location"
+
+msgid "Each card is one nginx location. Configure its path, backend, WebSocket, common headers, and any location-specific directives independently."
+msgstr "每张卡片对应一个 nginx location，可独立配置路径、后端、WebSocket、常用请求头和 Location 专属指令。"
+
+msgid "Headers:"
+msgstr "请求头："
+
+msgid "Host"
+msgstr "Host"
+
+msgid "Location backend must use http://, https://, unix:, grpc://, or grpcs://"
+msgstr "Location 后端必须使用 http://、https://、unix:、grpc:// 或 grpcs://"
+
+msgid "Location Directives"
+msgstr "Location 指令"
+
+msgid "Added only to this location. Use proxy_set_header, client_max_body_size, timeouts, and other location directives."
+msgstr "仅加入当前 Location；可使用 proxy_set_header、client_max_body_size、超时等任意 Location 指令。"
+
+msgid "Disable a common header here before redefining that same header in Location Directives."
+msgstr "若要在 Location 指令中重新定义同名请求头，请先在此处关闭对应的常用请求头。"

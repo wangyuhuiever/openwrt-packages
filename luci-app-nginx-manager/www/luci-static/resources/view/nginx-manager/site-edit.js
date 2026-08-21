@@ -17,11 +17,11 @@ var callGetSite = rpc.declare({
 var callSetSite = rpc.declare({
 	object: 'nginx_manager',
 	method: 'set_site',
-	params: ['id', 'name', 'mode', 'server_name', 'listen_addr', 'listen_port', 'proxy_pass', 'root', 'index',
+	params: ['id', 'name', 'mode', 'server_name', 'listen_addr', 'listen_port', 'proxy_path', 'proxy_pass', 'root', 'index',
 		'websocket', 'proxy_type', 'grpc_path', 'grpc_pass', 'custom_proxy_headers', 'redirect_https', 'redirect_http_port', 'proxy_host', 'proxy_xff', 'proxy_xfp', 'proxy_xri',
 		'ssl_cert', 'ssl_protocols', 'ssl_ciphers', 'hsts_max_age',
 		'access_log', 'error_log', 'custom_server_block', 'redirect_target', 'enabled',
-		'proxy_connect_timeout', 'proxy_read_timeout', 'proxy_send_timeout'],
+		'proxy_connect_timeout', 'proxy_read_timeout', 'proxy_send_timeout', 'locations'],
 	expect: {}
 });
 
@@ -77,9 +77,14 @@ return view.extend({
 			siteId = window.location.hash.split('/').pop();
 		}
 
-		var page = E('div', { 'class': 'cbi-map' });
+		var page = E('div', { 'class': 'cbi-map nm-site-edit' });
 
 		utils.loadSharedCSS();
+		/* Keep the site-editor layout stylesheet fresh when this view is deployed
+		 * directly to a router instead of through a package upgrade. */
+		var sharedCss = document.getElementById('nm-shared-css');
+		if (sharedCss)
+			sharedCss.href = L.resource('nginx-manager/nginx-manager.css') + '?v=site-editor-location-layout-4';
 
 		page.appendChild(E('h2', { 'class': 'cbi-map-title' }, isNew ? _('Add Site') : _('Edit Site')));
 
@@ -112,9 +117,7 @@ return view.extend({
 		var sslSection, proxySection, staticSection, redirectSection, customSection;
 
 		/* references for visibility updates */
-		var proxyTypeSelect, proxyPassInput, websocketRow, grpcPassthroughRow, grpcPassthroughFields;
-		var proxyHostRow, proxyXffRow, proxyXfpRow, proxyXriRow;
-		var proxyHeadersTitle, customHeadersField, customHeadersInput, customHeadersDesc;
+		var locationsContainer;
 
 		function updateVisibility() {
 			var mode = modeSelect.value;
@@ -123,36 +126,6 @@ return view.extend({
 			staticSection.style.display   = mode === 'static'        ? '' : 'none';
 			redirectSection.style.display = mode === 'redirect'      ? '' : 'none';
 			customSection.style.display   = mode === 'custom'        ? '' : 'none';
-
-			/* proxy-type specific: update proxy_pass placeholder and sub-sections */
-			if (mode === 'reverse_proxy' && proxyTypeSelect) {
-				var ptype = proxyTypeSelect.value;
-				var isGrpc = (ptype === 'grpc');
-				if (isGrpc) {
-					proxyPassInput.placeholder = 'grpc://127.0.0.1:9000';
-					websocketRow.style.display = 'none';
-					grpcPassthroughRow.style.display = 'none';
-					grpcPassthroughFields.style.display = 'none';
-				} else {
-					proxyPassInput.placeholder = 'http://127.0.0.1:3000';
-					websocketRow.style.display = '';
-					grpcPassthroughRow.style.display = '';
-					/* gRPC passthrough fields visibility depends on checkbox */
-					var grpcPassthroughCb = document.getElementById('opt-grpc_passthrough');
-					grpcPassthroughFields.style.display = (grpcPassthroughCb && grpcPassthroughCb.checked) ? '' : 'none';
-				}
-
-				/* gRPC: hide XFF/XFP (not applicable), update headers title & custom placeholder */
-				if (proxyXffRow) proxyXffRow.style.display = isGrpc ? 'none' : '';
-				if (proxyXfpRow) proxyXfpRow.style.display = isGrpc ? 'none' : '';
-				if (proxyHeadersTitle) proxyHeadersTitle.textContent = isGrpc ? _('gRPC Headers') : _('Common Proxy Headers');
-				if (customHeadersInput) customHeadersInput.placeholder = isGrpc
-					? 'grpc_set_header X-Custom-Header "value";\ngrpc_set_header Authorization $http_authorization;'
-					: 'proxy_set_header Accept-Encoding "";\nsub_filter_once on;';
-				if (customHeadersDesc) customHeadersDesc.textContent = isGrpc
-					? _('Persistent directives added inside the main gRPC location. Use grpc_set_header for headers.')
-					: _('Persistent directives added inside location /. Supports proxy_set_header, sub_filter, and other location directives.');
-			}
 		}
 
 		/* ========== Basic Settings ========== */
@@ -299,111 +272,102 @@ return view.extend({
 		/* ========== Reverse Proxy ========== */
 		proxySection = E('div', { 'class': 'cbi-section' });
 		proxySection.appendChild(E('h3', {}, _('Reverse Proxy')));
+		proxySection.appendChild(E('div', { 'class': 'cbi-value-description', 'style': 'margin-bottom:0.75em;' },
+			_('Each card is one nginx location. Configure its path, backend, WebSocket, common headers, and any location-specific directives independently.')));
+		locationsContainer = E('div', { 'class': 'nm-location-cards' });
+		proxySection.appendChild(locationsContainer);
 
-		/* Proxy Type: HTTP / gRPC (WebSocket is a checkbox under HTTP) */
-		proxyTypeSelect = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'http' }, _('HTTP')),
-			E('option', { 'value': 'grpc' }, _('gRPC'))
-		]);
-		/* Backward compat: migrate proxy_type=websocket → http + websocket=1 */
-		if (!isNew && site && site.proxy_type) {
-			if (site.proxy_type === 'websocket') {
-				proxyTypeSelect.value = 'http';
-				site.websocket = '1';
-			} else {
-				proxyTypeSelect.value = site.proxy_type;
+		function makeToggle(label, value, attribute, extraClass) {
+			var input = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+			input.checked = value === '1';
+			input.setAttribute(attribute, '1');
+			return E('div', {
+				'class': 'nm-location-toggle' + (extraClass ? ' ' + extraClass : ''),
+				'click': function(ev) {
+					if (ev.target !== input)
+						input.checked = !input.checked;
+				}
+			}, [input, E('span', {}, label)]);
+		}
+
+		function addLocationCard(location, isPrimary) {
+			location = location || {};
+			var pathInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'data-location-path': '1', 'placeholder': '/' });
+			var backendInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'data-location-backend': '1', 'placeholder': 'http://127.0.0.1:8000/' });
+			var websocketControl = makeToggle(_('WebSocket'), location.websocket || '0', 'data-location-websocket', 'nm-location-websocket');
+			var websocketInput = websocketControl.querySelector('input');
+			var directivesInput = E('textarea', {
+				'class': 'cbi-input-textarea', 'rows': 3, 'data-location-directives': '1',
+				'placeholder': 'proxy_set_header Host $http_host;\nproxy_read_timeout 1200s;\nclient_max_body_size 0;'
+			});
+			pathInput.value = location.path || '/';
+			backendInput.value = location.proxy_pass || '';
+			websocketInput.checked = location.websocket === '1';
+			directivesInput.value = location.directives || '';
+			var defaultHeaders = {
+				proxy_host: (!isNew && site && site.proxy_host) || '1',
+				proxy_xff: (!isNew && site && site.proxy_xff) || '1',
+				proxy_xfp: (!isNew && site && site.proxy_xfp) || '1',
+				proxy_xri: (!isNew && site && site.proxy_xri) || '1'
+			};
+			var headerRow = E('div', { 'class': 'nm-location-header-row' }, [
+				E('span', { 'style': 'color:#666;' }, _('Headers:')),
+				makeToggle('Host', location.proxy_host || defaultHeaders.proxy_host, 'data-location-proxy-host'),
+				makeToggle('X-Forwarded-For', location.proxy_xff || defaultHeaders.proxy_xff, 'data-location-proxy-xff'),
+				makeToggle('X-Forwarded-Proto', location.proxy_xfp || defaultHeaders.proxy_xfp, 'data-location-proxy-xfp'),
+				makeToggle('X-Real-IP', location.proxy_xri || defaultHeaders.proxy_xri, 'data-location-proxy-xri')
+			]);
+			var headerHint = E('div', { 'class': 'cbi-value-description', 'style': 'margin-top:0.2em;' },
+				_('Disable a common header here before redefining that same header in Location Directives.'));
+			var removeButton = E('button', {
+				'class': 'cbi-button cbi-button-remove',
+				'click': function() { row.remove(); updateRemoveButtons(); }
+			}, _('Remove'));
+			var topRow = E('div', { 'class': 'nm-location-top-row' }, [
+				E('label', { 'style': 'display:flex; flex:1 1 10em; flex-direction:column; gap:0.2em;' }, [_('Path'), pathInput]),
+				E('label', { 'style': 'display:flex; flex:2 1 18em; flex-direction:column; gap:0.2em;' }, [_('Backend Address'), backendInput]),
+				websocketControl,
+				removeButton
+			]);
+			var row = E('div', { 'class': 'nm-location-card cbi-section', 'style': 'margin:0 0 0.65em; padding:0.65em 0.75em;' }, [
+				topRow,
+				headerRow,
+				headerHint,
+				E('details', { 'style': 'margin-top:0.45em;' }, [
+					E('summary', {}, _('Location Directives')),
+					E('div', { 'style': 'margin-top:0.4em;' }, [directivesInput]),
+					E('div', { 'class': 'cbi-value-description' }, _('Added only to this location. Use proxy_set_header, client_max_body_size, timeouts, and other location directives.'))
+				])
+			]);
+			row.setAttribute('data-primary-location', isPrimary ? '1' : '0');
+			locationsContainer.appendChild(row);
+			updateRemoveButtons();
+		}
+
+		function updateRemoveButtons() {
+			var cards = locationsContainer ? locationsContainer.querySelectorAll('.nm-location-card') : [];
+			for (var i = 0; i < cards.length; i++) {
+				var button = cards[i].querySelector('.cbi-button-remove');
+				button.disabled = cards.length === 1;
 			}
 		}
-		proxyTypeSelect.addEventListener('change', updateVisibility);
-		proxySection.appendChild(makeField('opt-proxy_type', _('Proxy Type'), proxyTypeSelect));
 
-		/* Proxy Pass */
-		proxyPassInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'http://127.0.0.1:3000' });
-		if (!isNew && site && site.proxy_pass) proxyPassInput.value = site.proxy_pass;
-		proxySection.appendChild(makeField('opt-proxy_pass', _('Backend Address'), proxyPassInput,
-			_('Uses grpc:// or grpcs:// scheme.')));
-
-		/* WebSocket Support (only visible when proxy_type=http) */
-		websocketRow = makeFlag('opt-websocket', _('WebSocket Support'),
-			!isNew && site ? site.websocket === '1' : false);
-		proxySection.appendChild(websocketRow);
-
-		/* gRPC Passthrough (only visible when proxy_type=http, requires checkbox) */
-		grpcPassthroughRow = makeFlag('opt-grpc_passthrough', _('gRPC Passthrough'),
-			!isNew && site ? (site.grpc_path || site.grpc_pass) : false);
-		var grpcPassthroughCb = grpcPassthroughRow.querySelector('input[type="checkbox"]');
-		proxySection.appendChild(grpcPassthroughRow);
-
-		grpcPassthroughFields = E('div', { 'style': 'display:none;' });
-
-		var grpcPathInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '/grpc' });
-		if (!isNew && site && site.grpc_path) grpcPathInput.value = site.grpc_path;
-		grpcPassthroughFields.appendChild(makeField('opt-grpc_path', _('gRPC Path'), grpcPathInput,
-			_('URL path for gRPC traffic, e.g. /grpc or /api.Service')));
-
-			var grpcPassInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'grpc://127.0.0.1:9000' });
-		if (!isNew && site && site.grpc_pass) grpcPassInput.value = site.grpc_pass;
-		grpcPassthroughFields.appendChild(makeField('opt-grpc_pass', _('gRPC Backend Address'), grpcPassInput,
-			_('Uses grpc:// or grpcs:// scheme.')));
-
-		proxySection.appendChild(grpcPassthroughFields);
-
-		function updateGrpcPassthroughVisibility() {
-			var isHttp = proxyTypeSelect.value === 'http';
-			grpcPassthroughFields.style.display = (isHttp && grpcPassthroughCb.checked) ? '' : 'none';
+		var storedLocations = (!isNew && site && Array.isArray(site.locations)) ? site.locations : [];
+		var v2Locations = storedLocations.filter(function(location) { return location.format === 'v2'; });
+		if (v2Locations.length) {
+			v2Locations.forEach(function(location, index) { addLocationCard(location, index === 0); });
+		} else {
+			addLocationCard({
+				path: (!isNew && site && site.proxy_path) || '/',
+				proxy_pass: (!isNew && site && site.proxy_pass) || '',
+				websocket: (!isNew && site && site.websocket) || '0',
+				directives: (!isNew && site && site.custom_proxy_headers) || ''
+			}, true);
+			storedLocations.forEach(function(location) { addLocationCard(location, false); });
 		}
-		grpcPassthroughCb.addEventListener('change', updateGrpcPassthroughVisibility);
-
-		/* Common Proxy Headers */
-		proxyHeadersTitle = E('h4', { 'class': 'nm-subsection-title' }, _('Common Proxy Headers'));
-		proxySection.appendChild(proxyHeadersTitle);
-
-		proxyHostRow = makeFlag('opt-proxy_host', _('Proxy Host Header'),
-			!isNew && site ? site.proxy_host === '1' : true);
-		proxySection.appendChild(proxyHostRow);
-
-		proxyXffRow = makeFlag('opt-proxy_xff', _('X-Forwarded-For'),
-			!isNew && site ? site.proxy_xff === '1' : true);
-		proxySection.appendChild(proxyXffRow);
-
-		proxyXfpRow = makeFlag('opt-proxy_xfp', _('X-Forwarded-Proto'),
-			!isNew && site ? site.proxy_xfp === '1' : true);
-		proxySection.appendChild(proxyXfpRow);
-
-		proxyXriRow = makeFlag('opt-proxy_xri', _('X-Real-IP'),
-			!isNew && site ? site.proxy_xri === '1' : true);
-		proxySection.appendChild(proxyXriRow);
-
-		/* Persistent custom directives inside the main proxy location */
-		customHeadersInput = E('textarea', {
-			'class': 'cbi-input-textarea',
-			'rows': 5,
-			'placeholder': 'proxy_set_header Accept-Encoding "";\nsub_filter \'</head>\' \'<script src="https://example.com/inject.js"></script></head>\';\nsub_filter_once on;'
-		});
-		if (!isNew && site && site.custom_proxy_headers) customHeadersInput.value = site.custom_proxy_headers;
-		customHeadersField = makeField('opt-custom_proxy_headers', _('Custom Location Directives'), customHeadersInput, null);
-		customHeadersDesc = E('div', { 'class': 'cbi-value-description' },
-			_('Persistent directives added inside location /. Supports proxy_set_header, sub_filter, and other location directives.'));
-		customHeadersField.querySelector('.cbi-value-field').appendChild(customHeadersDesc);
-		proxySection.appendChild(customHeadersField);
-
-		/* Proxy Timeouts */
-		proxySection.appendChild(E('h4', { 'class': 'nm-subsection-title' }, _('Proxy Timeouts')));
-
-		var proxyConnectTimeoutInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '60s' });
-		if (!isNew && site && site.proxy_connect_timeout) proxyConnectTimeoutInput.value = site.proxy_connect_timeout;
-		proxySection.appendChild(makeField('opt-proxy_connect_timeout', _('Connect Timeout'), proxyConnectTimeoutInput,
-			_('Timeout for establishing a connection to the backend. Default: 60s.')));
-
-		var proxyReadTimeoutInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '60s' });
-		if (!isNew && site && site.proxy_read_timeout) proxyReadTimeoutInput.value = site.proxy_read_timeout;
-		proxySection.appendChild(makeField('opt-proxy_read_timeout', _('Read Timeout'), proxyReadTimeoutInput,
-			_('Timeout for reading a response from the backend. Default: 60s.')));
-
-		var proxySendTimeoutInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '60s' });
-		if (!isNew && site && site.proxy_send_timeout) proxySendTimeoutInput.value = site.proxy_send_timeout;
-		proxySection.appendChild(makeField('opt-proxy_send_timeout', _('Send Timeout'), proxySendTimeoutInput,
-			_('Timeout for sending a request to the backend. Default: 60s.')));
+		proxySection.appendChild(E('button', {
+			'class': 'cbi-button', 'style': 'margin-top:0.1em;', 'click': function() { addLocationCard({ path: '/api/' }, false); }
+		}, '+ ' + _('Add Location')));
 
 		page.appendChild(proxySection);
 
@@ -436,16 +400,20 @@ return view.extend({
 		customSection = E('div', { 'class': 'cbi-section' });
 		customSection.appendChild(E('h3', {}, _('Custom Server Block')));
 
-		var customBlockEditor = utils.createCodeEditor(
-			(!isNew && site && site.custom_server_block) ? site.custom_server_block : '',
-			'site.conf',
-			{ readonly: false }
-		);
+		var customBlockInput = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'rows': 20,
+			'spellcheck': 'false',
+			'placeholder': 'server {\n    listen 80;\n    server_name example.com;\n\n    location / {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}'
+		});
+		customBlockInput.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+		if (!isNew && site && site.custom_server_block)
+			customBlockInput.value = site.custom_server_block;
 
 		var customBlockEditorRow = E('div', { 'class': 'cbi-value' });
 		customBlockEditorRow.appendChild(E('label', { 'class': 'cbi-value-title' }, _('Custom Server Block Content')));
 		var customBlockEditorField = E('div', { 'class': 'cbi-value-field' });
-		customBlockEditorField.appendChild(customBlockEditor.container);
+		customBlockEditorField.appendChild(customBlockInput);
 		customBlockEditorRow.appendChild(customBlockEditorField);
 		customSection.appendChild(customBlockEditorRow);
 
@@ -632,6 +600,31 @@ return view.extend({
 		updateVisibility();
 
 		/* ---- save logic ---- */
+		function encodeLocationDirectives(value) {
+			var utf8 = unescape(encodeURIComponent(value));
+			var encoded = '';
+			for (var i = 0; i < utf8.length; i++)
+				encoded += ('0' + utf8.charCodeAt(i).toString(16)).slice(-2);
+			return encoded;
+		}
+
+		function showSaveError(detail) {
+			function closeErrorModal(ev) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				if (document.activeElement)
+					document.activeElement.blur();
+				ui.hideModal();
+			}
+
+			ui.showModal(_('Configuration test failed'), [
+				E('pre', { 'style': 'white-space:pre-wrap; overflow-wrap:anywhere; margin:0;' }, String(detail || _('Save failed'))),
+				E('div', { 'class': 'right' }, [
+					E('button', { 'type': 'button', 'class': 'cbi-button', 'click': closeErrorModal }, _('Close'))
+				])
+			]);
+		}
+
 		function saveSite() {
 			var data = { id: siteId || document.getElementById('opt-name').value.trim() };
 
@@ -658,26 +651,53 @@ return view.extend({
 			data.hsts_max_age        = document.getElementById('opt-hsts_max_age').value.trim();
 			data.redirect_https      = document.getElementById('opt-redirect_https').checked ? '1' : '0';
 			data.redirect_http_port  = document.getElementById('opt-redirect_http_port').value.trim();
-			data.proxy_pass          = document.getElementById('opt-proxy_pass').value.trim();
-			data.proxy_type          = document.getElementById('opt-proxy_type').value;
-			data.websocket           = document.getElementById('opt-websocket').checked ? '1' : '0';
-			data.grpc_path           = document.getElementById('opt-grpc_path').value.trim();
-			data.grpc_pass           = document.getElementById('opt-grpc_pass').value.trim();
-			data.custom_proxy_headers = document.getElementById('opt-custom_proxy_headers').value.trim();
-			data.proxy_host          = document.getElementById('opt-proxy_host').checked ? '1' : '0';
-			data.proxy_xff           = document.getElementById('opt-proxy_xff').checked ? '1' : '0';
-			data.proxy_xfp           = document.getElementById('opt-proxy_xfp').checked ? '1' : '0';
-			data.proxy_xri           = document.getElementById('opt-proxy_xri').checked ? '1' : '0';
 			data.root                = document.getElementById('opt-root').value.trim();
 			data.index               = document.getElementById('opt-index').value.trim();
 			data.redirect_target     = document.getElementById('opt-redirect_target').value.trim();
-			data.custom_server_block = customBlockEditor.textarea.value;
+			data.custom_server_block = customBlockInput.value;
 			data.access_log          = document.getElementById('opt-access_log').checked ? '1' : '0';
 			data.error_log           = document.getElementById('opt-error_log').checked ? '1' : '0';
 
-			data.proxy_connect_timeout = document.getElementById('opt-proxy_connect_timeout').value.trim();
-			data.proxy_read_timeout    = document.getElementById('opt-proxy_read_timeout').value.trim();
-			data.proxy_send_timeout    = document.getElementById('opt-proxy_send_timeout').value.trim();
+			data.proxy_connect_timeout = (!isNew && site && site.proxy_connect_timeout) || '';
+			data.proxy_read_timeout    = (!isNew && site && site.proxy_read_timeout) || '';
+			data.proxy_send_timeout    = (!isNew && site && site.proxy_send_timeout) || '';
+			var locationRows = locationsContainer.querySelectorAll('.nm-location-card');
+			var locationLines = [];
+			var locationPaths = {};
+			for (var li = 0; li < locationRows.length; li++) {
+				var locationPath = locationRows[li].querySelector('[data-location-path]').value.trim();
+				var locationBackend = locationRows[li].querySelector('[data-location-backend]').value.trim();
+				var locationWebsocket = locationRows[li].querySelector('[data-location-websocket]').checked ? '1' : '0';
+				var locationDirectives = locationRows[li].querySelector('[data-location-directives]').value;
+				var locationProxyHost = locationRows[li].querySelector('[data-location-proxy-host]').checked ? '1' : '0';
+				var locationProxyXff = locationRows[li].querySelector('[data-location-proxy-xff]').checked ? '1' : '0';
+				var locationProxyXfp = locationRows[li].querySelector('[data-location-proxy-xfp]').checked ? '1' : '0';
+				var locationProxyXri = locationRows[li].querySelector('[data-location-proxy-xri]').checked ? '1' : '0';
+				if (data.mode !== 'reverse_proxy') break;
+				if (!locationPath || !locationBackend || locationPaths[locationPath] || !/^\/[A-Za-z0-9._~!$&()*+,;=:@%/-]*$/.test(locationPath)) {
+					ui.addNotification(null, E('p', {}, _('Each location needs a unique path and backend address')), 'error');
+					return;
+				}
+				if (!/^(https?:\/\/|unix:|grpcs?:\/\/)/.test(locationBackend)) {
+					ui.addNotification(null, E('p', {}, _('Location backend must use http://, https://, unix:, grpc://, or grpcs://')), 'error');
+					return;
+				}
+				locationPaths[locationPath] = true;
+				locationLines.push(locationPath + '|' + locationBackend + '|' + locationWebsocket + '|' + locationProxyHost + '|' + locationProxyXff + '|' + locationProxyXfp + '|' + locationProxyXri + '|' + encodeLocationDirectives(locationDirectives));
+			}
+			data.locations = locationLines.join('\n');
+			var firstLocation = locationRows[0];
+			data.proxy_path = firstLocation ? firstLocation.querySelector('[data-location-path]').value.trim() || '/' : '/';
+			data.proxy_pass = firstLocation ? firstLocation.querySelector('[data-location-backend]').value.trim() : '';
+			data.websocket = firstLocation && firstLocation.querySelector('[data-location-websocket]').checked ? '1' : '0';
+			data.proxy_type = 'http';
+			data.grpc_path = '';
+			data.grpc_pass = '';
+			data.custom_proxy_headers = '';
+			data.proxy_host = firstLocation && firstLocation.querySelector('[data-location-proxy-host]').checked ? '1' : '0';
+			data.proxy_xff = firstLocation && firstLocation.querySelector('[data-location-proxy-xff]').checked ? '1' : '0';
+			data.proxy_xfp = firstLocation && firstLocation.querySelector('[data-location-proxy-xfp]').checked ? '1' : '0';
+			data.proxy_xri = firstLocation && firstLocation.querySelector('[data-location-proxy-xri]').checked ? '1' : '0';
 
 			return callSetSite(
 				data.id,
@@ -686,6 +706,7 @@ return view.extend({
 				data.server_name,
 				data.listen_addr,
 				data.listen_port,
+				data.proxy_path,
 				data.proxy_pass,
 				data.root,
 				data.index,
@@ -711,10 +732,11 @@ return view.extend({
 				data.enabled,
 				data.proxy_connect_timeout,
 				data.proxy_read_timeout,
-				data.proxy_send_timeout
+				data.proxy_send_timeout,
+				data.locations
 			).then(function(result) {
 				if (result && result.error) {
-					ui.addNotification(null, E('p', {}, _('Configuration test failed') + ': ' + (result.detail || result.error)), 'error');
+					showSaveError(result.detail || result.error);
 				} else {
 					ui.addNotification(null, E('p', {}, _('Site saved successfully')), 'info');
 					setTimeout(function() {
@@ -722,7 +744,7 @@ return view.extend({
 					}, 800);
 				}
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, _('Save failed') + ': ' + (err.message || JSON.stringify(err))), 'error');
+				showSaveError(err.message || JSON.stringify(err));
 			});
 		}
 
