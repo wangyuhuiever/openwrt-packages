@@ -100,6 +100,41 @@ validate_acme_credential() {
 	echo "$1" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*=.+$'
 }
 
+# Keep the global DNS credential store deliberately small and explicit. Apart
+# from making the UI predictable, this prevents an RPC caller from creating
+# arbitrary UCI options through the credentials parameter.
+global_dns_provider_keys() {
+	case "$1" in
+		dns_cf) echo 'CF_Token CF_Account_ID CF_Zone_ID' ;;
+		dns_dp) echo 'DP_Id DP_Key' ;;
+		dns_ali) echo 'Ali_Key Ali_Secret' ;;
+		dns_huaweicloud) echo 'HUAWEICLOUD_Username HUAWEICLOUD_Password HUAWEICLOUD_DomainName' ;;
+		dns_aws) echo 'AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY' ;;
+		dns_gd) echo 'GD_Key GD_Secret' ;;
+		dns_namecheap) echo 'NAMECHEAP_USERNAME NAMECHEAP_API_KEY NAMECHEAP_SOURCEIP' ;;
+		*) return 1 ;;
+	esac
+}
+
+is_global_dns_provider_key() {
+	local provider="$1"
+	local target="$2"
+	local key
+	for key in $(global_dns_provider_keys "${provider}"); do
+		[ "${key}" = "${target}" ] && return 0
+	done
+	return 1
+}
+
+is_scanned_acme_cert_path() {
+	case "$1" in
+		/etc/ssl/acme/*.fullchain.crt)
+			[ -f "$1" ]
+			;;
+		*) return 1 ;;
+	esac
+}
+
 validate_acme_account_email() {
 	echo "$1" | grep -qE '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+$' || return 1
 	echo "$1" | grep -qiE '@(example\.(com|net|org)|localhost)$' && return 1
@@ -2775,6 +2810,243 @@ handle_acme_status() {
 	json_dump
 }
 
+handle_scan_acme_certs() {
+	load_global_config
+	config_load nginx_manager
+
+	json_init
+	json_add_array "certificates"
+
+	local cert_file domain key_file expiry_days expiry_date is_linked linked_id linked_name
+	local dir
+
+	# OpenWrt's acme package exposes its usable certificate/key pairs here.
+	# Other acme.sh working directories may contain the same files repeatedly.
+	for dir in /etc/ssl/acme; do
+		[ -d "${dir}" ] || continue
+		for cert_file in "${dir}"/*.fullchain.crt; do
+			[ -f "${cert_file}" ] || continue
+
+			domain=""
+			key_file=""
+			case "${cert_file}" in
+				*.fullchain.crt)
+					domain="$(basename "${cert_file}" .fullchain.crt)"
+					key_file="${dir}/${domain}.key"
+					;;
+			esac
+
+			[ -z "${domain}" ] && continue
+
+			expiry_days="$(get_cert_expiry "${cert_file}")" || expiry_days="-1"
+			expiry_date="$(openssl x509 -enddate -noout -in "${cert_file}" 2>/dev/null | cut -d= -f2)"
+
+			_SCAN_MATCHED_CERT_ID=""
+			_SCAN_MATCHED_CERT_NAME=""
+			_SCAN_TARGET_CERT_PATH="${cert_file}"
+			_SCAN_TARGET_DOMAIN="${domain}"
+			config_foreach _check_scan_linked cert
+
+			is_linked="0"
+			linked_id=""
+			linked_name=""
+			if [ -n "${_SCAN_MATCHED_CERT_ID}" ]; then
+				is_linked="1"
+				linked_id="${_SCAN_MATCHED_CERT_ID}"
+				linked_name="${_SCAN_MATCHED_CERT_NAME}"
+			fi
+
+			json_add_object ""
+			json_add_string "domain" "${domain}"
+			json_add_string "cert_path" "${cert_file}"
+			json_add_string "key_path" "${key_file}"
+			json_add_string "expiry_days" "${expiry_days}"
+			json_add_string "expiry_date" "${expiry_date}"
+			json_add_string "is_linked" "${is_linked}"
+			json_add_string "linked_cert_id" "${linked_id}"
+			json_add_string "linked_cert_name" "${linked_name}"
+			json_close_object
+		done
+	done
+
+	json_close_array
+	json_dump
+}
+
+_SCAN_MATCHED_CERT_ID=""
+_SCAN_MATCHED_CERT_NAME=""
+_SCAN_TARGET_CERT_PATH=""
+_SCAN_TARGET_DOMAIN=""
+_check_scan_linked() {
+	local sec="$1"
+	local cp real_cp real_target
+	cp="$(uci -q get "nginx_manager.${sec}.cert_path")" || cp=""
+
+	if [ -n "${cp}" ]; then
+		if [ "${cp}" = "${_SCAN_TARGET_CERT_PATH}" ]; then
+			_SCAN_MATCHED_CERT_ID="${sec}"
+			_SCAN_MATCHED_CERT_NAME="$(uci -q get "nginx_manager.${sec}.name")" || _SCAN_MATCHED_CERT_NAME="${sec}"
+			return 0
+		fi
+		real_cp="$(readlink -f "${cp}" 2>/dev/null)"
+		real_target="$(readlink -f "${_SCAN_TARGET_CERT_PATH}" 2>/dev/null)"
+		if [ -n "${real_cp}" ] && [ -n "${real_target}" ] && [ "${real_cp}" = "${real_target}" ]; then
+			_SCAN_MATCHED_CERT_ID="${sec}"
+			_SCAN_MATCHED_CERT_NAME="$(uci -q get "nginx_manager.${sec}.name")" || _SCAN_MATCHED_CERT_NAME="${sec}"
+			return 0
+		fi
+	fi
+}
+
+handle_import_acme_cert() {
+	local cert_name domain cert_path key_path cert_id
+	json_get_var cert_name "id"
+	json_get_var domain "domain"
+	json_get_var cert_path "cert_path"
+	json_get_var key_path "key_path"
+
+	[ -z "${cert_name}" ] && { json_init; json_add_string "error" "missing id"; json_dump; return; }
+	validate_name "${cert_name}" || { json_init; json_add_string "error" "invalid id"; json_dump; return; }
+	[ -z "${domain}" ] && { json_init; json_add_string "error" "missing domain"; json_dump; return; }
+	validate_domain "${domain}" || { json_init; json_add_string "error" "invalid domain"; json_dump; return; }
+
+	resolve_new_cert_id "${cert_name}" || { json_init; json_add_string "error" "${_RESOLVE_CERT_ID_ERROR}"; json_dump; return; }
+	cert_id="${_RESOLVED_CERT_ID}"
+
+	# The browser may only choose a path emitted by handle_scan_acme_certs. Do
+	# not let a crafted ubus request create links to arbitrary system files.
+	is_scanned_acme_cert_path "${cert_path}" || {
+		json_init; json_add_string "error" "certificate file not found"; json_dump; return;
+	}
+
+	# Derive the key path on the router rather than trusting the RPC argument.
+	key_path="$(dirname "${cert_path}")/$(basename "${cert_path}" .fullchain.crt).key"
+	[ -f "${key_path}" ] || {
+		json_init; json_add_string "error" "private key file not found"; json_dump; return;
+	}
+
+	load_global_config
+	local cert_subdir="${CERT_DIR}/${cert_id}"
+	mkdir -p "${cert_subdir}"
+	chmod 700 "${cert_subdir}"
+
+	ln -sf "${cert_path}" "${cert_subdir}/fullchain.pem"
+	if [ -n "${key_path}" ] && [ -f "${key_path}" ]; then
+		ln -sf "${key_path}" "${cert_subdir}/privkey.pem"
+	fi
+
+	local auto_renew="0"
+	if uci -q get "acme.${cert_id}" >/dev/null 2>&1; then
+		auto_renew="1"
+	fi
+
+	uci set "nginx_manager.${cert_id}=cert"
+	uci set "nginx_manager.${cert_id}.name=${cert_name}"
+	uci set "nginx_manager.${cert_id}.type=acme"
+	uci set "nginx_manager.${cert_id}.cert_path=${cert_subdir}/fullchain.pem"
+	uci set "nginx_manager.${cert_id}.key_path=${cert_subdir}/privkey.pem"
+	uci set "nginx_manager.${cert_id}.domain=${domain}"
+	uci set "nginx_manager.${cert_id}.auto_renew=${auto_renew}"
+	uci set "nginx_manager.${cert_id}.acme_status=success"
+	uci commit nginx_manager
+
+	json_init
+	json_add_string "result" "ok"
+	json_add_string "id" "${cert_id}"
+	json_dump
+}
+
+handle_get_acme_global_config() {
+	config_load nginx_manager
+
+	local account_email default_dns_api dns_wait
+	account_email="$(uci -q get nginx_manager.acme_global.account_email)" || account_email=""
+	default_dns_api="$(uci -q get nginx_manager.acme_global.default_dns_api)" || default_dns_api="dns_cf"
+	dns_wait="$(uci -q get nginx_manager.acme_global.dns_wait)" || dns_wait="120"
+
+	if [ -z "${account_email}" ]; then
+		account_email="$(uci -q get acme.acme.account_email)" || account_email=""
+	fi
+
+	json_init
+	json_add_string "account_email" "${account_email}"
+	json_add_string "default_dns_api" "${default_dns_api}"
+	json_add_string "dns_wait" "${dns_wait}"
+
+	json_add_object "providers"
+	local p
+	for p in dns_cf dns_dp dns_ali dns_huaweicloud dns_aws dns_gd dns_namecheap; do
+		json_add_object "${p}"
+		local opt_val opt_key
+		for opt_key in CF_Token CF_Account_ID CF_Zone_ID DP_Id DP_Key Ali_Key Ali_Secret HUAWEICLOUD_Username HUAWEICLOUD_Password HUAWEICLOUD_DomainName AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GD_Key GD_Secret NAMECHEAP_USERNAME NAMECHEAP_API_KEY NAMECHEAP_SOURCEIP; do
+			opt_val="$(uci -q get "nginx_manager.acme_dns_${p}.${opt_key}")" || continue
+			[ -n "${opt_val}" ] && json_add_string "${opt_key}" "${opt_val}"
+		done
+		json_close_object
+	done
+	json_close_object
+	json_dump
+}
+
+handle_set_acme_global_config() {
+	local account_email default_dns_api dns_wait dns_api credentials
+	json_get_var account_email "account_email"
+	json_get_var default_dns_api "default_dns_api"
+	json_get_var dns_wait "dns_wait"
+	json_get_var dns_api "dns_api"
+	json_get_var credentials "credentials"
+
+	if [ -n "${default_dns_api}" ]; then
+		global_dns_provider_keys "${default_dns_api}" >/dev/null || { json_init; json_add_string "error" "invalid dns api"; json_dump; return; }
+	fi
+	if [ -n "${dns_wait}" ]; then
+		validate_positive_number "${dns_wait}" || { json_init; json_add_string "error" "invalid dns wait seconds"; json_dump; return; }
+	fi
+	if [ -n "${dns_api}" ]; then
+		global_dns_provider_keys "${dns_api}" >/dev/null || { json_init; json_add_string "error" "invalid dns api"; json_dump; return; }
+		printf '%s\n' "${credentials}" | while IFS= read -r credential_line; do
+			credential_line="$(printf '%s' "${credential_line}" | tr -d '\r')"
+			[ -z "${credential_line}" ] && continue
+			validate_acme_credential "${credential_line}" || exit 1
+			local key
+			key="${credential_line%%=*}"
+			is_global_dns_provider_key "${dns_api}" "${key}" || exit 1
+		done || { json_init; json_add_string "error" "invalid dns credentials"; json_dump; return; }
+	fi
+
+	uci set nginx_manager.acme_global=acme_global
+	if [ -n "${account_email}" ]; then
+		validate_acme_account_email "${account_email}" || { json_init; json_add_string "error" "invalid acme account email"; json_dump; return; }
+		uci set "nginx_manager.acme_global.account_email=${account_email}"
+		ensure_acme_account_config "${account_email}"
+	fi
+	[ -n "${default_dns_api}" ] && uci set "nginx_manager.acme_global.default_dns_api=${default_dns_api}"
+	[ -n "${dns_wait}" ] && uci set "nginx_manager.acme_global.dns_wait=${dns_wait}"
+
+	if [ -n "${dns_api}" ]; then
+		local section_name="acme_dns_${dns_api}"
+		uci set "nginx_manager.${section_name}=dns_provider"
+		local allowed_key
+		for allowed_key in $(global_dns_provider_keys "${dns_api}"); do
+			uci -q delete "nginx_manager.${section_name}.${allowed_key}" 2>/dev/null
+		done
+		printf '%s\n' "${credentials}" | while IFS= read -r credential_line; do
+			credential_line="$(printf '%s' "${credential_line}" | tr -d '\r')"
+			[ -z "${credential_line}" ] && continue
+			local key val
+			key="${credential_line%%=*}"
+			val="${credential_line#*=}"
+			uci set "nginx_manager.${section_name}.${key}=${val}"
+		done
+	fi
+
+	uci commit nginx_manager
+
+	json_init
+	json_add_string "result" "ok"
+	json_dump
+}
+
 case "$1" in
 	list)
 		json_init
@@ -2929,6 +3201,27 @@ case "$1" in
 		json_add_string "task_id" ""
 		json_close_object
 
+		json_add_object "scan_acme_certs"
+		json_close_object
+
+		json_add_object "import_acme_cert"
+		json_add_string "id" ""
+		json_add_string "domain" ""
+		json_add_string "cert_path" ""
+		json_add_string "key_path" ""
+		json_close_object
+
+		json_add_object "get_acme_global_config"
+		json_close_object
+
+		json_add_object "set_acme_global_config"
+		json_add_string "account_email" ""
+		json_add_string "default_dns_api" ""
+		json_add_string "dns_wait" ""
+		json_add_string "dns_api" ""
+		json_add_string "credentials" ""
+		json_close_object
+
 		json_add_object "list_files"
 		json_add_string "dir" ""
 		json_close_object
@@ -3050,6 +3343,10 @@ case "$1" in
 			acme_update)        handle_acme_update ;;
 			acme_renew)         handle_acme_renew ;;
 			acme_status)        handle_acme_status ;;
+			scan_acme_certs)    handle_scan_acme_certs ;;
+			import_acme_cert)   handle_import_acme_cert ;;
+			get_acme_global_config) handle_get_acme_global_config ;;
+			set_acme_global_config) handle_set_acme_global_config ;;
 			list_files)        handle_list_files ;;
 			save_file)         handle_save_file ;;
 			chmod_file)        handle_chmod_file ;;

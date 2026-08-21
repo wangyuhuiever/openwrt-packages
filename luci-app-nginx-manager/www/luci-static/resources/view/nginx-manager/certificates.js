@@ -101,6 +101,32 @@ var callUploadCert = rpc.declare({
 	expect: {}
 });
 
+var callScanAcmeCerts = rpc.declare({
+	object: 'nginx_manager',
+	method: 'scan_acme_certs',
+	expect: {}
+});
+
+var callImportAcmeCert = rpc.declare({
+	object: 'nginx_manager',
+	method: 'import_acme_cert',
+	params: ['id', 'domain', 'cert_path', 'key_path'],
+	expect: {}
+});
+
+var callGetAcmeGlobalConfig = rpc.declare({
+	object: 'nginx_manager',
+	method: 'get_acme_global_config',
+	expect: {}
+});
+
+var callSetAcmeGlobalConfig = rpc.declare({
+	object: 'nginx_manager',
+	method: 'set_acme_global_config',
+	params: ['account_email', 'default_dns_api', 'dns_wait', 'dns_api', 'credentials'],
+	expect: {}
+});
+
 var ACME_POLL_INTERVAL = 3000;
 
 function certStatusLabel(status) {
@@ -695,6 +721,799 @@ function showEditCertModal(cert) {
 	checkReissueNeeded();
 }
 
+function showGlobalAcmeSettingsModal() {
+	ui.showModal(_('Global ACME & DNS Settings'), [E('p', { 'class': 'is-loading' }, _('Loading settings...'))]);
+	callGetAcmeGlobalConfig().then(function(config) {
+		config = config || {};
+		var providers = config.providers || {};
+
+		var emailInput = E('input', {
+			'type': 'email',
+			'class': 'cbi-input-text',
+			'placeholder': 'admin@your-domain.com',
+			'value': config.account_email || ''
+		});
+
+		var dnsWaitInput = E('input', {
+			'type': 'number',
+			'class': 'cbi-input-text',
+			'min': '0',
+			'placeholder': '120',
+			'value': config.dns_wait || '120'
+		});
+
+		var dnsApiSelectOptions = [];
+		var dnsApiKeys = Object.keys(DNS_API_INFO);
+		for (var k = 0; k < dnsApiKeys.length; k++) {
+			var apiId = dnsApiKeys[k];
+			dnsApiSelectOptions.push(E('option', { 'value': apiId }, apiId + ' (' + DNS_API_INFO[apiId].name + ')'));
+		}
+		var providerSelect = E('select', { 'class': 'cbi-input-select' }, dnsApiSelectOptions);
+		providerSelect.value = config.default_dns_api || 'dns_cf';
+
+		var credsContainer = E('div', { 'class': 'nm-global-creds-container', 'style': 'margin-top: 1em;' });
+
+		function renderProviderFields() {
+			credsContainer.innerHTML = '';
+			var selectedApi = providerSelect.value;
+			var info = DNS_API_INFO[selectedApi];
+			if (!info) return;
+
+			var currentCreds = providers[selectedApi] || {};
+
+			info.keys.forEach(function(keyInfo) {
+				var val = currentCreds[keyInfo.key] || '';
+				var input = E('input', {
+					'type': 'password',
+					'class': 'cbi-input-text',
+					'data-global-key': keyInfo.key,
+					'placeholder': keyInfo.key + '=...',
+					'value': val,
+					'autocomplete': 'new-password'
+				});
+				var field = E('div', { 'class': 'cbi-value' }, [
+					E('label', { 'class': 'cbi-value-title' }, keyInfo.key + (keyInfo.optional ? ' (' + _('Optional') + ')' : '')),
+					E('div', { 'class': 'cbi-value-field' }, [
+						input,
+						keyInfo.desc ? E('div', { 'class': 'cbi-value-description' }, keyInfo.desc) : null
+					])
+				]);
+				credsContainer.appendChild(field);
+			});
+		}
+
+		providerSelect.addEventListener('change', renderProviderFields);
+		renderProviderFields();
+
+		ui.showModal(_('Global ACME & DNS Settings'), [
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Default ACME Account Email')),
+				E('div', { 'class': 'cbi-value-field' }, [
+					emailInput,
+					E('div', { 'class': 'cbi-value-description' }, _('Default email address for ACME account registration and renewals.'))
+				])
+			]),
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Default DNS Propagation Wait')),
+				E('div', { 'class': 'cbi-value-field' }, [
+					dnsWaitInput,
+					E('div', { 'class': 'cbi-value-description' }, _('Seconds to wait for DNS propagation before ACME validation.'))
+				])
+			]),
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Credentials Provider')),
+				E('div', { 'class': 'cbi-value-field' }, [
+					providerSelect,
+					E('div', { 'class': 'cbi-value-description' }, _('Configure keys and tokens for DNS providers. These will be pre-filled automatically when requesting certificates.'))
+				])
+			]),
+			credsContainer,
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+				E('button', {
+					'class': 'cbi-button cbi-button-apply',
+					'click': function() {
+						var newEmail = emailInput.value.trim();
+						var newWait = dnsWaitInput.value.trim();
+						var selectedApi = providerSelect.value;
+						var inputs = credsContainer.querySelectorAll('input[data-global-key]');
+						var lines = [];
+						for (var i = 0; i < inputs.length; i++) {
+							var k = inputs[i].getAttribute('data-global-key');
+							var v = inputs[i].value.trim();
+							if (v) lines.push(k + '=' + v);
+						}
+						var credStr = lines.join('\n');
+
+						if (newEmail && (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(newEmail) || /@(example\.(com|net|org)|localhost)$/i.test(newEmail))) {
+							ui.addNotification(null, E('p', {}, _('Invalid ACME account email')), 'error');
+							return;
+						}
+
+						ui.hideModal();
+						ui.showModal(_('Saving...'), [E('p', {}, _('Please wait...'))]);
+
+						callSetAcmeGlobalConfig(newEmail, '', newWait, selectedApi, credStr).then(function(res) {
+							ui.hideModal();
+							if (res && res.error) {
+								ui.addNotification(null, E('p', {}, _(res.error)), 'error');
+							} else {
+								ui.addNotification(null, E('p', {}, _('Global ACME and DNS settings saved')), 'info');
+							}
+						}).catch(function(err) {
+							ui.hideModal();
+							ui.addNotification(null, E('p', {}, _('Failed to save global settings') + ': ' + err), 'error');
+						});
+					}
+				}, _('Save'))
+			])
+		]);
+	}).catch(function(err) {
+		ui.showModal(_('Global ACME & DNS Settings'), [
+			E('p', { 'class': 'alert-message error' }, String(err)),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+			])
+		]);
+	});
+}
+
+function showScanAcmeModal() {
+	ui.showModal(_('Scan ACME Certificates'), [E('p', { 'class': 'is-loading' }, _('Scanning system ACME certificates (/etc/ssl/acme)...'))]);
+	callScanAcmeCerts().then(function(result) {
+		var list = (result && result.certificates) || [];
+		if (list.length === 0) {
+			ui.showModal(_('Scan ACME Certificates'), [
+				E('div', { 'class': 'cbi-section' }, [
+					E('p', { 'class': 'nm-empty-state' }, _('No ACME certificates found in /etc/ssl/acme or acme.sh directories.'))
+				]),
+				E('div', { 'class': 'right' }, [
+					E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+				])
+			]);
+			return;
+		}
+
+		var selectedCert = null;
+		var certNameInput = E('input', {
+			'type': 'text',
+			'class': 'cbi-input-text',
+			'placeholder': _('e.g. my-cert-name')
+		});
+		var certNameDesc = E('div', { 'class': 'cbi-value-description' }, utils.NAME_TIP);
+		utils.validateNameInput(certNameInput, certNameDesc);
+
+		var table = E('table', { 'class': 'table nm-responsive-table' });
+		var thead = E('thead');
+		var headerRow = E('tr');
+		['', _('Domain'), _('Expiry / Status'), _('Status / Linked Certificate')].forEach(function(title) {
+			headerRow.appendChild(E('th', {}, title));
+		});
+		thead.appendChild(headerRow);
+		table.appendChild(thead);
+
+		list.forEach(function(item) {
+			var row = E('tr');
+			var radioTd = E('td');
+			var isLinked = item.is_linked === '1';
+
+			var radio = E('input', {
+				'type': 'radio',
+				'name': 'scanned_cert_radio',
+				'value': item.domain,
+				'disabled': isLinked ? 'disabled' : null
+			});
+
+			if (!isLinked && !selectedCert) {
+				radio.checked = true;
+				selectedCert = item;
+				certNameInput.value = item.domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
+			}
+
+			radio.addEventListener('change', function() {
+				if (radio.checked) {
+					selectedCert = item;
+					certNameInput.value = item.domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
+				}
+			});
+
+			radioTd.appendChild(radio);
+			row.appendChild(radioTd);
+
+			var domainTd = E('td', { 'data-label': _('Domain') });
+			domainTd.appendChild(E('strong', {}, item.domain));
+			domainTd.appendChild(E('div', { 'class': 'cbi-value-description', 'style': 'font-size:0.85em;' }, item.cert_path));
+			row.appendChild(domainTd);
+
+			var expiryDays = parseInt(item.expiry_days, 10);
+			var expiryText = '-';
+			var statusBadgeClass = 'nm-badge success';
+			if (isNaN(expiryDays) || expiryDays < 0) {
+				expiryText = _('Expired');
+				statusBadgeClass = 'nm-badge error';
+			} else if (expiryDays <= 30) {
+				expiryText = _('Expires in %d days').replace('%d', expiryDays);
+				statusBadgeClass = 'nm-badge warning';
+			} else {
+				expiryText = _('Expires in %d days').replace('%d', expiryDays);
+				statusBadgeClass = 'nm-badge success';
+			}
+			var expiryTd = E('td', { 'data-label': _('Expiry / Status') }, [
+				E('span', { 'class': statusBadgeClass }, expiryText),
+				item.expiry_date ? E('div', { 'class': 'cbi-value-description', 'style': 'font-size:0.85em;' }, item.expiry_date) : null
+			]);
+			row.appendChild(expiryTd);
+
+			var statusTd = E('td', { 'data-label': _('Status / Linked Certificate') });
+			if (isLinked) {
+				statusTd.appendChild(E('span', { 'class': 'nm-badge disabled' }, _('Already Linked') + (item.linked_cert_name ? ' (' + item.linked_cert_name + ')' : '')));
+			} else {
+				statusTd.appendChild(E('span', { 'class': 'nm-badge success' }, _('Available to Import')));
+			}
+			row.appendChild(statusTd);
+
+			table.appendChild(row);
+		});
+
+		var nameRow = E('div', { 'class': 'cbi-value' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Certificate Name')),
+			E('div', { 'class': 'cbi-value-field' }, [
+				certNameInput,
+				certNameDesc
+			])
+		]);
+
+		ui.showModal(_('Scan ACME Certificates'), [
+			E('div', { 'class': 'cbi-value-description', 'style': 'margin-bottom: 1em;' },
+				_('Discovered certificates generated by ACME. Select an unlinked certificate to import into Nginx Manager.')),
+			table,
+			nameRow,
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+				E('button', {
+					'class': 'cbi-button cbi-button-apply',
+					'click': function() {
+						if (!selectedCert) {
+							ui.addNotification(null, E('p', {}, _('Please select an ACME certificate to import')), 'error');
+							return;
+						}
+						var name = certNameInput.value.trim();
+						if (!name) {
+							ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
+							return;
+						}
+						if (!utils.NAME_PATTERN.test(name)) {
+							ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
+							return;
+						}
+						ui.hideModal();
+						ui.showModal(_('Importing...'), [E('p', {}, _('Please wait...'))]);
+
+						callImportAcmeCert(name, selectedCert.domain, selectedCert.cert_path, selectedCert.key_path).then(function(res) {
+							ui.hideModal();
+							if (res && res.error) {
+								ui.addNotification(null, E('p', {}, _(res.error)), 'error');
+							} else {
+								ui.addNotification(null, E('p', {}, _('ACME certificate imported successfully')), 'info');
+								setTimeout(function() { location.reload(); }, 500);
+							}
+						}).catch(function(err) {
+							ui.hideModal();
+							ui.addNotification(null, E('p', {}, _('Failed to import certificate') + ': ' + err), 'error');
+						});
+					}
+				}, '\u271A ' + _('Import Certificate'))
+			])
+		]);
+	}).catch(function(err) {
+		ui.showModal(_('Scan ACME Certificates'), [
+			E('p', { 'class': 'alert-message error' }, String(err)),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+			])
+		]);
+	});
+}
+
+function showAddCertModal(globalConfig) {
+	globalConfig = globalConfig || {};
+	var providers = globalConfig.providers || {};
+
+	var certNameInput = E('input', { 'type': 'text', 'id': 'new-cert-name', 'class': 'cbi-input-text' });
+	var certNameDesc = E('div', { 'class': 'cbi-value-description' }, utils.NAME_TIP + ' ' + _('e.g. my-cert'));
+	utils.validateNameInput(certNameInput, certNameDesc);
+
+	var certTypeSelect = E('select', { 'id': 'new-cert-type', 'class': 'cbi-input-select' }, [
+		E('option', { 'value': 'manual' }, _('Manual')),
+		E('option', { 'value': 'self_signed' }, _('Self-Signed Certificate')),
+		E('option', { 'value': 'acme' }, _('Auto (ACME)')),
+		E('option', { 'value': 'acme_scan' }, _('Scan System ACME Certificates'))
+	]);
+
+	var certDomainInput = E('input', { 'type': 'text', 'id': 'new-cert-domain', 'class': 'cbi-input-text' });
+
+	var acmeAccountEmailInput = E('input', {
+		'type': 'email',
+		'id': 'new-acme-account-email',
+		'class': 'cbi-input-text',
+		'placeholder': 'admin@your-domain.com',
+		'value': globalConfig.account_email || ''
+	});
+
+	var acmeAutoRenewInput = E('input', {
+		'type': 'checkbox',
+		'id': 'new-acme-auto-renew',
+		'class': 'cbi-input-checkbox'
+	});
+	acmeAutoRenewInput.checked = true;
+
+	var acmeMethodSelect = E('select', { 'id': 'new-acme-method', 'class': 'cbi-input-select' }, [
+		E('option', { 'value': 'webroot' }, _('HTTP-01 Webroot')),
+		E('option', { 'value': 'dns' }, _('DNS-01')),
+		E('option', { 'value': 'standalone' }, _('HTTP-01 Standalone'))
+	]);
+
+	var dnsApiSelectOptions = [E('option', { 'value': '' }, _('-- Please choose --'))];
+	var dnsApiKeys = Object.keys(DNS_API_INFO);
+	for (var k = 0; k < dnsApiKeys.length; k++) {
+		var apiId = dnsApiKeys[k];
+		dnsApiSelectOptions.push(E('option', { 'value': apiId }, apiId + ' (' + DNS_API_INFO[apiId].name + ')'));
+	}
+	dnsApiSelectOptions.push(E('option', { 'value': '_custom' }, _('Custom...')));
+	var dnsApiSelect = E('select', { 'id': 'new-acme-dns-api', 'class': 'cbi-input-select' }, dnsApiSelectOptions);
+	if (globalConfig.default_dns_api && DNS_API_INFO[globalConfig.default_dns_api]) {
+		dnsApiSelect.value = globalConfig.default_dns_api;
+	}
+
+	var dnsApiCustomInput = E('input', {
+		'type': 'text',
+		'id': 'new-acme-dns-api-custom',
+		'class': 'cbi-input-text',
+		'placeholder': 'dns_xx',
+		'style': 'display:none'
+	});
+
+	var dnsCredsContainer = E('div', { 'id': 'new-acme-dns-creds-container' });
+	var dnsCredentialsInput = E('textarea', {
+		'id': 'new-acme-dns-credentials',
+		'class': 'cbi-input-textarea nm-modal-textarea',
+		'rows': 5,
+		'placeholder': 'KEY=VALUE\nKEY2=VALUE2',
+		'style': 'display:none'
+	});
+
+	var dnsWaitInput = E('input', {
+		'type': 'number',
+		'id': 'new-acme-dns-wait',
+		'class': 'cbi-input-text',
+		'min': '0',
+		'placeholder': '120',
+		'value': globalConfig.dns_wait || '120'
+	});
+
+	var scanContainer = E('div', { 'id': 'cert-scan-container', 'style': 'display:none; margin-top: 1em;' });
+	var selectedScanCert = null;
+
+	function loadScannedCerts() {
+		scanContainer.innerHTML = '';
+		scanContainer.appendChild(E('p', { 'class': 'is-loading' }, _('Scanning system ACME certificates (/etc/ssl/acme)...')));
+		selectedScanCert = null;
+
+		callScanAcmeCerts().then(function(result) {
+			scanContainer.innerHTML = '';
+			var list = (result && result.certificates) || [];
+			if (list.length === 0) {
+				scanContainer.appendChild(E('p', { 'class': 'nm-empty-state' }, _('No ACME certificates found in /etc/ssl/acme or acme.sh directories.')));
+				return;
+			}
+
+			var table = E('table', { 'class': 'table nm-responsive-table' });
+			var thead = E('thead');
+			var headerRow = E('tr');
+			['', _('Domain'), _('Expiry / Status'), _('Status')].forEach(function(title) {
+				headerRow.appendChild(E('th', {}, title));
+			});
+			thead.appendChild(headerRow);
+			table.appendChild(thead);
+
+			list.forEach(function(item) {
+				var row = E('tr');
+				var radioTd = E('td');
+				var isLinked = item.is_linked === '1';
+
+				var radio = E('input', {
+					'type': 'radio',
+					'name': 'add_scanned_cert_radio',
+					'value': item.domain,
+					'disabled': isLinked ? 'disabled' : null
+				});
+
+				if (!isLinked && !selectedScanCert) {
+					radio.checked = true;
+					selectedScanCert = item;
+					if (!certNameInput.value)
+						certNameInput.value = item.domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
+				}
+
+				radio.addEventListener('change', function() {
+					if (radio.checked) {
+						selectedScanCert = item;
+						certNameInput.value = item.domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
+					}
+				});
+
+				radioTd.appendChild(radio);
+				row.appendChild(radioTd);
+
+				var domainTd = E('td', { 'data-label': _('Domain') });
+				domainTd.appendChild(E('strong', {}, item.domain));
+				domainTd.appendChild(E('div', { 'class': 'cbi-value-description', 'style': 'font-size:0.85em;' }, item.cert_path));
+				row.appendChild(domainTd);
+
+				var expiryDays = parseInt(item.expiry_days, 10);
+				var expiryText = '-';
+				var statusBadgeClass = 'nm-badge success';
+				if (isNaN(expiryDays) || expiryDays < 0) {
+					expiryText = _('Expired');
+					statusBadgeClass = 'nm-badge error';
+				} else if (expiryDays <= 30) {
+					expiryText = _('Expires in %d days').replace('%d', expiryDays);
+					statusBadgeClass = 'nm-badge warning';
+				} else {
+					expiryText = _('Expires in %d days').replace('%d', expiryDays);
+					statusBadgeClass = 'nm-badge success';
+				}
+				var expiryTd = E('td', { 'data-label': _('Expiry / Status') }, [
+					E('span', { 'class': statusBadgeClass }, expiryText),
+					item.expiry_date ? E('div', { 'class': 'cbi-value-description', 'style': 'font-size:0.85em;' }, item.expiry_date) : null
+				]);
+				row.appendChild(expiryTd);
+
+				var statusTd = E('td', { 'data-label': _('Status') });
+				if (isLinked) {
+					statusTd.appendChild(E('span', { 'class': 'nm-badge disabled' }, _('Already Linked') + (item.linked_cert_name ? ' (' + item.linked_cert_name + ')' : '')));
+				} else {
+					statusTd.appendChild(E('span', { 'class': 'nm-badge success' }, _('Available to Import')));
+				}
+				row.appendChild(statusTd);
+
+				table.appendChild(row);
+			});
+
+			scanContainer.appendChild(table);
+		}).catch(function(err) {
+			scanContainer.innerHTML = '';
+			scanContainer.appendChild(E('p', { 'class': 'alert-message error' }, String(err)));
+		});
+	}
+
+	function updateDnsCredsFields() {
+		var apiId = dnsApiSelect.value;
+		var info = DNS_API_INFO[apiId];
+		var customRow = document.getElementById('cert-dns-api-custom-row');
+		var credsRow = document.getElementById('cert-dns-creds-row');
+		var credsDesc = document.getElementById('cert-dns-creds-desc');
+		var isDns = certTypeSelect.value === 'acme' && acmeMethodSelect.value === 'dns';
+		dnsCredsContainer.innerHTML = '';
+		dnsCredentialsInput.style.display = 'none';
+
+		if (!isDns) {
+			if (customRow) customRow.style.display = 'none';
+			if (credsRow) credsRow.style.display = 'none';
+			dnsApiCustomInput.style.display = 'none';
+			return;
+		}
+
+		if (credsRow) credsRow.style.display = '';
+
+		if (apiId === '_custom') {
+			dnsApiCustomInput.style.display = '';
+			if (customRow) customRow.style.display = '';
+			dnsCredentialsInput.style.display = '';
+			if (credsDesc) credsDesc.style.display = '';
+		} else if (info) {
+			dnsApiCustomInput.style.display = 'none';
+			if (customRow) customRow.style.display = 'none';
+			if (credsDesc) credsDesc.style.display = 'none';
+
+			var savedCreds = providers[apiId] || {};
+
+			for (var i = 0; i < info.keys.length; i++) {
+				var keyInfo = info.keys[i];
+				var keyName = keyInfo.key;
+				var savedVal = savedCreds[keyName] || '';
+				var row = E('div', { 'class': 'nm-cred-field' }, [
+					E('label', { 'class': 'nm-cred-label' }, keyName + (keyInfo.optional ? ' (' + _('Optional') + ')' : '') + (savedVal ? ' (' + _('Pre-filled from Global Settings') + ')' : '')),
+					E('input', {
+						'type': 'password',
+						'class': 'cbi-input-text',
+						'data-cred-key': keyName,
+						'placeholder': keyName + '=...',
+						'value': savedVal,
+						'autocomplete': 'new-password'
+					}),
+					keyInfo.desc ? E('div', { 'class': 'cbi-value-description' }, keyInfo.desc) : null
+				]);
+				dnsCredsContainer.appendChild(row);
+			}
+		} else {
+			dnsApiCustomInput.style.display = 'none';
+			if (customRow) customRow.style.display = 'none';
+			if (credsDesc) credsDesc.style.display = 'none';
+		}
+	}
+
+	function updateAcmeRows() {
+		var domainRow = document.getElementById('cert-domain-row');
+		var acmeEmailRow = document.getElementById('cert-acme-email-row');
+		var acmeAutoRenewRow = document.getElementById('cert-acme-auto-renew-row');
+		var acmeMethodRow = document.getElementById('cert-acme-method-row');
+		var isAcme = certTypeSelect.value === 'acme';
+		var isScan = certTypeSelect.value === 'acme_scan';
+		var isDns = isAcme && acmeMethodSelect.value === 'dns';
+
+		if (domainRow) domainRow.style.display = (certTypeSelect.value === 'manual' || isScan) ? 'none' : '';
+		if (acmeEmailRow) acmeEmailRow.style.display = isAcme ? '' : 'none';
+		if (acmeAutoRenewRow) acmeAutoRenewRow.style.display = isAcme ? '' : 'none';
+		if (acmeMethodRow) acmeMethodRow.style.display = isAcme ? '' : 'none';
+		scanContainer.style.display = isScan ? '' : 'none';
+
+		if (isScan) {
+			loadScannedCerts();
+		}
+
+		var dnsBasicRows = document.querySelectorAll('.cert-dns-row');
+		for (var i = 0; i < dnsBasicRows.length; i++)
+			dnsBasicRows[i].style.display = isDns ? '' : 'none';
+
+		updateDnsCredsFields();
+	}
+
+	certTypeSelect.addEventListener('change', updateAcmeRows);
+	acmeMethodSelect.addEventListener('change', updateAcmeRows);
+	dnsApiSelect.addEventListener('change', updateDnsCredsFields);
+
+	ui.showModal(_('Add Certificate'), [
+		E('div', { 'class': 'cbi-value' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Certificate Name')),
+			E('div', { 'class': 'cbi-value-field' }, [certNameInput, certNameDesc])
+		]),
+		E('div', { 'class': 'cbi-value' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Type')),
+			E('div', { 'class': 'cbi-value-field' }, certTypeSelect)
+		]),
+		scanContainer,
+		E('div', { 'class': 'cbi-value', 'id': 'cert-domain-row' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Domain')),
+			E('div', { 'class': 'cbi-value-field' }, certDomainInput)
+		]),
+		E('div', { 'class': 'cbi-value', 'id': 'cert-acme-email-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('ACME Account Email')),
+			E('div', { 'class': 'cbi-value-field' }, [
+				acmeAccountEmailInput,
+				E('div', { 'class': 'cbi-value-description' }, _('A real email address is required for ACME account registration.'))
+			])
+		]),
+		E('div', { 'class': 'cbi-value', 'id': 'cert-acme-auto-renew-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Automatic Renewal')),
+			E('div', { 'class': 'cbi-value-field' }, [
+				E('label', {}, [
+					acmeAutoRenewInput,
+					' ',
+					_('Enable automatic renewal')
+				])
+			])
+		]),
+		E('div', { 'class': 'cbi-value', 'id': 'cert-acme-method-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('ACME Validation')),
+			E('div', { 'class': 'cbi-value-field' }, acmeMethodSelect)
+		]),
+		E('div', { 'class': 'cbi-value cert-dns-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('DNS Provider')),
+			E('div', { 'class': 'cbi-value-field' }, dnsApiSelect)
+		]),
+		E('div', { 'class': 'cbi-value', 'id': 'cert-dns-api-custom-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Custom DNS API Name')),
+			E('div', { 'class': 'cbi-value-field' }, [
+				dnsApiCustomInput,
+				E('div', { 'class': 'cbi-value-description' }, _('acme.sh DNS API script name, e.g. dns_myapi'))
+			])
+		]),
+		E('div', { 'class': 'cbi-value', 'id': 'cert-dns-creds-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('DNS Credentials')),
+			E('div', { 'class': 'cbi-value-field' }, [
+				dnsCredsContainer,
+				dnsCredentialsInput,
+				E('div', { 'class': 'cbi-value-description', 'id': 'cert-dns-creds-desc', 'style': 'display:none' }, _('One credential per line in KEY=VALUE format'))
+			])
+		]),
+		E('div', { 'class': 'cbi-value cert-dns-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('DNS Wait Seconds')),
+			E('div', { 'class': 'cbi-value-field' }, [
+				dnsWaitInput,
+				E('div', { 'class': 'cbi-value-description' }, _('Seconds to wait for DNS propagation before validation.'))
+			])
+		]),
+		E('div', { 'class': 'right' }, [
+			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'class': 'cbi-button cbi-button-apply',
+				'click': function() {
+					var certName = certNameInput.value.trim();
+					var certType = certTypeSelect.value;
+					var certDomain = certDomainInput.value.trim();
+					var acmeAccountEmail = acmeAccountEmailInput.value.trim();
+					var acmeAutoRenew = acmeAutoRenewInput.checked ? '1' : '0';
+					var acmeMethod = acmeMethodSelect.value;
+					var dnsApi, dnsCredentials, dnsWait;
+
+					if (certType === 'acme_scan') {
+						if (!selectedScanCert) {
+							ui.addNotification(null, E('p', {}, _('Please select an ACME certificate to import')), 'error');
+							return;
+						}
+						if (!certName) {
+							ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
+							return;
+						}
+						if (!utils.NAME_PATTERN.test(certName)) {
+							ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
+							return;
+						}
+						ui.hideModal();
+						ui.showModal(_('Importing...'), [E('p', {}, _('Please wait...'))]);
+						callImportAcmeCert(certName, selectedScanCert.domain, selectedScanCert.cert_path, selectedScanCert.key_path).then(function(res) {
+							ui.hideModal();
+							if (res && res.error) {
+								ui.addNotification(null, E('p', {}, _(res.error)), 'error');
+							} else {
+								ui.addNotification(null, E('p', {}, _('ACME certificate imported successfully')), 'info');
+								setTimeout(function() { location.reload(); }, 500);
+							}
+						}).catch(function(err) {
+							ui.hideModal();
+							ui.addNotification(null, E('p', {}, _('Failed to import certificate') + ': ' + err), 'error');
+						});
+						return;
+					}
+
+					if (acmeMethod === 'dns') {
+						if (dnsApiSelect.value === '_custom') {
+							dnsApi = dnsApiCustomInput.value.trim();
+						} else {
+							dnsApi = dnsApiSelect.value;
+						}
+						var credInputs = dnsCredsContainer.querySelectorAll('input[data-cred-key]');
+						if (credInputs.length > 0) {
+							var lines = [];
+							for (var ci = 0; ci < credInputs.length; ci++) {
+								var cVal = credInputs[ci].value.trim();
+								if (cVal) lines.push(credInputs[ci].getAttribute('data-cred-key') + '=' + cVal);
+							}
+							dnsCredentials = lines.join('\n');
+						} else {
+							dnsCredentials = dnsCredentialsInput.value.trim();
+						}
+					}
+					dnsWait = dnsWaitInput.value.trim();
+
+					if (!certName) {
+						ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
+						return;
+					}
+					if (!utils.NAME_PATTERN.test(certName)) {
+						ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
+						return;
+					}
+
+					ui.hideModal();
+
+					if (certType === 'self_signed') {
+						if (!certDomain) {
+							ui.addNotification(null, E('p', {}, _('Domain is required for self-signed certificates')), 'error');
+							return;
+						}
+						ui.showModal(_('Generating...'), [E('p', {}, _('Please wait...'))]);
+						callIssueSelfSigned(certName, certName, certDomain).then(function(result) {
+							ui.hideModal();
+							if (result && result.error) {
+								ui.addNotification(null, E('p', {}, result.error), 'error');
+							} else {
+								ui.addNotification(null, E('p', {}, _('Self-signed certificate generated')), 'info');
+								setTimeout(function() { location.reload(); }, 500);
+							}
+						}).catch(function(err) {
+							ui.hideModal();
+							ui.addNotification(null, E('p', {}, _('Failed to generate self-signed certificate') + ': ' + err), 'error');
+						});
+					} else if (certType === 'acme') {
+						if (!certDomain) {
+							ui.addNotification(null, E('p', {}, _('Domain is required for ACME certificates')), 'error');
+							return;
+						}
+						if (!acmeAccountEmail) {
+							ui.addNotification(null, E('p', {}, _('ACME account email is required')), 'error');
+							return;
+						}
+						if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(acmeAccountEmail) || /@(example\.(com|net|org)|localhost)$/i.test(acmeAccountEmail)) {
+							ui.addNotification(null, E('p', {}, _('Invalid ACME account email')), 'error');
+							return;
+						}
+						if ((acmeMethod === 'webroot' || acmeMethod === 'standalone') && certDomain.includes('*')) {
+							ui.addNotification(null, E('p', {}, _('Wildcard domains are not supported for ACME certificates')), 'error');
+							return;
+						}
+						if (acmeMethod === 'dns') {
+							if (!dnsApi) {
+								ui.addNotification(null, E('p', {}, _('DNS API is required for DNS-01 validation')), 'error');
+								return;
+							}
+							if (!dnsCredentials) {
+								ui.addNotification(null, E('p', {}, _('DNS credentials are required for DNS-01 validation')), 'error');
+								return;
+							}
+						}
+						ui.showModal(_('Requesting...'), [E('p', {}, _('Please wait, ACME certificate issuance may take a while...'))]);
+						callAcmeIssue(certName, certDomain, acmeAccountEmail, acmeMethod, dnsApi, dnsCredentials, dnsWait, acmeAutoRenew).then(function(result) {
+							ui.hideModal();
+							if (result && result.error) {
+								var errMsg = _(result.error);
+								if (result.detail) errMsg += ': ' + result.detail;
+								ui.addNotification(null, E('p', {}, _('Failed to issue ACME certificate') + ': ' + errMsg), 'error');
+								return;
+							}
+							ui.addNotification(null, E('p', {}, _('ACME certificate requested')), 'info');
+							setTimeout(function() { location.reload(); }, 500);
+						}).catch(function(err) {
+							ui.hideModal();
+							ui.addNotification(null, E('p', {}, _('Failed to issue ACME certificate') + ': ' + err), 'error');
+						});
+					} else {
+						var certPemInput = E('textarea', { 'id': 'cert-pem', 'class': 'cbi-input-textarea nm-modal-textarea', 'rows': 10 });
+						var keyPemInput = E('textarea', { 'id': 'key-pem', 'class': 'cbi-input-textarea nm-modal-textarea', 'rows': 10 });
+						ui.showModal(_('Upload Certificate'), [
+							E('div', { 'class': 'cbi-value' }, [
+								E('label', { 'class': 'cbi-value-title' }, _('Certificate (PEM)')),
+								E('div', { 'class': 'cbi-value-field' }, certPemInput)
+							]),
+							E('div', { 'class': 'cbi-value' }, [
+								E('label', { 'class': 'cbi-value-title' }, _('Private Key (PEM)')),
+								E('div', { 'class': 'cbi-value-field' }, keyPemInput)
+							]),
+							E('div', { 'class': 'right' }, [
+								E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+								E('button', {
+									'class': 'cbi-button cbi-button-apply',
+									'click': function() {
+										var certPem = certPemInput.value;
+										var keyPem = keyPemInput.value;
+										if (!certPem || !keyPem) {
+											ui.addNotification(null, E('p', {}, _('Both certificate and key are required')), 'error');
+											return;
+										}
+										ui.hideModal();
+										callUploadCert({ id: certName, name: certName, cert_content: certPem, key_content: keyPem, domain: certDomain }).then(function(result) {
+											if (result && result.error) {
+												ui.addNotification(null, E('p', {}, result.error), 'error');
+											} else {
+												ui.addNotification(null, E('p', {}, _('Certificate uploaded')), 'info');
+												setTimeout(function() { location.reload(); }, 500);
+											}
+										}).catch(function(err) {
+											ui.addNotification(null, E('p', {}, _('Failed to upload certificate') + ': ' + err), 'error');
+										});
+									}
+								}, '\u271A ' + _('Upload'))
+							])
+						]);
+					}
+				}
+			}, '\u271A ' + _('Create'))
+		])
+	]);
+	updateAcmeRows();
+}
+
 return view.extend({
 	load: function() {
 		return callListCerts();
@@ -709,351 +1528,25 @@ return view.extend({
 
 		container.appendChild(E('h2', { 'class': 'cbi-map-title' }, _('Certificates')));
 
-		var headerSection = E('div', { 'class': 'cbi-section' });
+		var headerSection = E('div', { 'class': 'cbi-section', 'style': 'display:flex; gap:0.5em; flex-wrap:wrap;' });
 
 		headerSection.appendChild(E('button', {
 			'class': 'cbi-button cbi-button-apply',
 			'click': function() {
-				var certNameInput = E('input', { 'type': 'text', 'id': 'new-cert-name', 'class': 'cbi-input-text' });
-				var certNameDesc = E('div', { 'class': 'cbi-value-description' }, utils.NAME_TIP + ' ' + _('e.g. my-cert'));
-				utils.validateNameInput(certNameInput, certNameDesc);
-				var certTypeSelect = E('select', { 'id': 'new-cert-type', 'class': 'cbi-input-select' }, [
-					E('option', { 'value': 'manual' }, _('Manual')),
-					E('option', { 'value': 'self_signed' }, _('Self-Signed Certificate')),
-					E('option', { 'value': 'acme' }, _('Auto (ACME)'))
-				]);
-				var certDomainInput = E('input', { 'type': 'text', 'id': 'new-cert-domain', 'class': 'cbi-input-text' });
-				var acmeAccountEmailInput = E('input', {
-					'type': 'email',
-					'id': 'new-acme-account-email',
-					'class': 'cbi-input-text',
-					'placeholder': 'admin@your-domain.com'
+				callGetAcmeGlobalConfig().then(function(config) {
+					showAddCertModal(config);
+				}).catch(function() {
+					showAddCertModal({});
 				});
-				var acmeAutoRenewInput = E('input', {
-					'type': 'checkbox',
-					'id': 'new-acme-auto-renew',
-					'class': 'cbi-input-checkbox'
-				});
-				acmeAutoRenewInput.checked = true;
-				var acmeMethodSelect = E('select', { 'id': 'new-acme-method', 'class': 'cbi-input-select' }, [
-					E('option', { 'value': 'webroot' }, _('HTTP-01 Webroot')),
-					E('option', { 'value': 'dns' }, _('DNS-01')),
-					E('option', { 'value': 'standalone' }, _('HTTP-01 Standalone'))
-				]);
-				var dnsApiSelectOptions = [E('option', { 'value': '' }, _('-- Please choose --'))];
-				var dnsApiKeys = Object.keys(DNS_API_INFO);
-				for (var k = 0; k < dnsApiKeys.length; k++) {
-					var apiId = dnsApiKeys[k];
-					dnsApiSelectOptions.push(E('option', { 'value': apiId }, apiId + ' (' + DNS_API_INFO[apiId].name + ')'));
-				}
-				dnsApiSelectOptions.push(E('option', { 'value': '_custom' }, _('Custom...')));
-				var dnsApiSelect = E('select', { 'id': 'new-acme-dns-api', 'class': 'cbi-input-select' }, dnsApiSelectOptions);
-				var dnsApiCustomInput = E('input', {
-					'type': 'text',
-					'id': 'new-acme-dns-api-custom',
-					'class': 'cbi-input-text',
-					'placeholder': 'dns_xx',
-					'style': 'display:none'
-				});
-				var dnsCredsContainer = E('div', { 'id': 'new-acme-dns-creds-container' });
-				var dnsCredentialsInput = E('textarea', {
-					'id': 'new-acme-dns-credentials',
-					'class': 'cbi-input-textarea nm-modal-textarea',
-					'rows': 5,
-					'placeholder': 'KEY=VALUE\nKEY2=VALUE2',
-					'style': 'display:none'
-				});
-				var dnsWaitInput = E('input', {
-					'type': 'number',
-					'id': 'new-acme-dns-wait',
-					'class': 'cbi-input-text',
-					'min': '0',
-					'placeholder': '120'
-				});
-
-				function updateDnsCredsFields() {
-					var apiId = dnsApiSelect.value;
-					var info = DNS_API_INFO[apiId];
-					var customRow = document.getElementById('cert-dns-api-custom-row');
-					var credsRow = document.getElementById('cert-dns-creds-row');
-					var credsDesc = document.getElementById('cert-dns-creds-desc');
-					var isDns = certTypeSelect.value === 'acme' && acmeMethodSelect.value === 'dns';
-					dnsCredsContainer.innerHTML = '';
-					dnsCredentialsInput.style.display = 'none';
-
-					if (!isDns) {
-						if (customRow) customRow.style.display = 'none';
-						if (credsRow) credsRow.style.display = 'none';
-						dnsApiCustomInput.style.display = 'none';
-						return;
-					}
-
-					if (credsRow) credsRow.style.display = '';
-
-					if (apiId === '_custom') {
-						dnsApiCustomInput.style.display = '';
-						if (customRow) customRow.style.display = '';
-						dnsCredentialsInput.style.display = '';
-						if (credsDesc) credsDesc.style.display = '';
-					} else if (info) {
-						dnsApiCustomInput.style.display = 'none';
-						if (customRow) customRow.style.display = 'none';
-						if (credsDesc) credsDesc.style.display = 'none';
-						for (var i = 0; i < info.keys.length; i++) {
-							var keyInfo = info.keys[i];
-							var keyName = keyInfo.key;
-							var row = E('div', { 'class': 'nm-cred-field' }, [
-								E('label', { 'class': 'nm-cred-label' }, keyName + (keyInfo.optional ? ' (' + _('Optional') + ')' : '')),
-								E('input', { 'type': 'password', 'class': 'cbi-input-text', 'data-cred-key': keyName, 'placeholder': keyName + '=...', 'autocomplete': 'new-password' }),
-								keyInfo.desc ? E('div', { 'class': 'cbi-value-description' }, keyInfo.desc) : null
-							]);
-							dnsCredsContainer.appendChild(row);
-						}
-					} else {
-						dnsApiCustomInput.style.display = 'none';
-						if (customRow) customRow.style.display = 'none';
-						if (credsDesc) credsDesc.style.display = 'none';
-					}
-				}
-
-				function updateAcmeRows() {
-					var domainRow = document.getElementById('cert-domain-row');
-					var acmeEmailRow = document.getElementById('cert-acme-email-row');
-					var acmeAutoRenewRow = document.getElementById('cert-acme-auto-renew-row');
-					var acmeMethodRow = document.getElementById('cert-acme-method-row');
-					var isAcme = certTypeSelect.value === 'acme';
-					var isDns = isAcme && acmeMethodSelect.value === 'dns';
-
-					if (domainRow) domainRow.style.display = certTypeSelect.value === 'manual' ? 'none' : '';
-					if (acmeEmailRow) acmeEmailRow.style.display = isAcme ? '' : 'none';
-					if (acmeAutoRenewRow) acmeAutoRenewRow.style.display = isAcme ? '' : 'none';
-					if (acmeMethodRow) acmeMethodRow.style.display = isAcme ? '' : 'none';
-
-					// Toggle basic DNS rows (provider select + wait)
-					var dnsBasicRows = document.querySelectorAll('.cert-dns-row');
-					for (var i = 0; i < dnsBasicRows.length; i++)
-						dnsBasicRows[i].style.display = isDns ? '' : 'none';
-
-					// Update credential fields (also handles custom-row and creds-row visibility)
-					updateDnsCredsFields();
-				}
-
-				certTypeSelect.addEventListener('change', updateAcmeRows);
-				acmeMethodSelect.addEventListener('change', updateAcmeRows);
-				dnsApiSelect.addEventListener('change', updateDnsCredsFields);
-
-				ui.showModal(_('Add Certificate'), [
-					E('div', { 'class': 'cbi-value' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('Certificate Name')),
-						E('div', { 'class': 'cbi-value-field' }, [certNameInput, certNameDesc])
-					]),
-					E('div', { 'class': 'cbi-value' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('Type')),
-						E('div', { 'class': 'cbi-value-field' }, certTypeSelect)
-					]),
-					E('div', { 'class': 'cbi-value', 'id': 'cert-domain-row' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('Domain')),
-						E('div', { 'class': 'cbi-value-field' }, certDomainInput)
-					]),
-					E('div', { 'class': 'cbi-value', 'id': 'cert-acme-email-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('ACME Account Email')),
-						E('div', { 'class': 'cbi-value-field' }, [
-							acmeAccountEmailInput,
-							E('div', { 'class': 'cbi-value-description' }, _('A real email address is required for ACME account registration.'))
-						])
-					]),
-					E('div', { 'class': 'cbi-value', 'id': 'cert-acme-auto-renew-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('Automatic Renewal')),
-						E('div', { 'class': 'cbi-value-field' }, [
-							E('label', {}, [
-								acmeAutoRenewInput,
-								' ',
-								_('Enable automatic renewal')
-							])
-						])
-					]),
-					E('div', { 'class': 'cbi-value', 'id': 'cert-acme-method-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('ACME Validation')),
-						E('div', { 'class': 'cbi-value-field' }, acmeMethodSelect)
-					]),
-					E('div', { 'class': 'cbi-value cert-dns-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('DNS Provider')),
-						E('div', { 'class': 'cbi-value-field' }, dnsApiSelect)
-					]),
-					E('div', { 'class': 'cbi-value', 'id': 'cert-dns-api-custom-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('Custom DNS API Name')),
-						E('div', { 'class': 'cbi-value-field' }, [
-							dnsApiCustomInput,
-							E('div', { 'class': 'cbi-value-description' }, _('acme.sh DNS API script name, e.g. dns_myapi'))
-						])
-					]),
-					E('div', { 'class': 'cbi-value', 'id': 'cert-dns-creds-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('DNS Credentials')),
-						E('div', { 'class': 'cbi-value-field' }, [
-							dnsCredsContainer,
-							dnsCredentialsInput,
-							E('div', { 'class': 'cbi-value-description', 'id': 'cert-dns-creds-desc', 'style': 'display:none' }, _('One credential per line in KEY=VALUE format'))
-						])
-					]),
-					E('div', { 'class': 'cbi-value cert-dns-row', 'style': 'display:none' }, [
-						E('label', { 'class': 'cbi-value-title' }, _('DNS Wait Seconds')),
-						E('div', { 'class': 'cbi-value-field' }, [
-							dnsWaitInput,
-							E('div', { 'class': 'cbi-value-description' }, _('Seconds to wait for DNS propagation before validation.'))
-						])
-					]),
-					E('div', { 'class': 'right' }, [
-						E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
-						E('button', {
-							'class': 'cbi-button cbi-button-apply',
-							'click': function() {
-								var certName = certNameInput.value.trim();
-								var certType = certTypeSelect.value;
-								var certDomain = certDomainInput.value.trim();
-								var acmeAccountEmail = acmeAccountEmailInput.value.trim();
-								var acmeAutoRenew = acmeAutoRenewInput.checked ? '1' : '0';
-								var acmeMethod = acmeMethodSelect.value;
-								var dnsApi, dnsCredentials, dnsWait;
-
-								// Resolve DNS API name
-								if (acmeMethod === 'dns') {
-									if (dnsApiSelect.value === '_custom') {
-										dnsApi = dnsApiCustomInput.value.trim();
-									} else {
-										dnsApi = dnsApiSelect.value;
-									}
-									// Build credentials from dynamic fields or textarea
-									var credInputs = dnsCredsContainer.querySelectorAll('input[data-cred-key]');
-									if (credInputs.length > 0) {
-										var lines = [];
-										for (var ci = 0; ci < credInputs.length; ci++) {
-											var cVal = credInputs[ci].value.trim();
-											if (cVal) lines.push(credInputs[ci].getAttribute('data-cred-key') + '=' + cVal);
-										}
-										dnsCredentials = lines.join('\n');
-									} else {
-										dnsCredentials = dnsCredentialsInput.value.trim();
-									}
-								}
-								dnsWait = dnsWaitInput.value.trim();
-
-								if (!certName) {
-									ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
-									return;
-								}
-								if (!utils.NAME_PATTERN.test(certName)) {
-									ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
-									return;
-								}
-
-								ui.hideModal();
-
-								if (certType === 'self_signed') {
-									if (!certDomain) {
-										ui.addNotification(null, E('p', {}, _('Domain is required for self-signed certificates')), 'error');
-										return;
-									}
-									ui.showModal(_('Generating...'), [E('p', {}, _('Please wait...'))]);
-									callIssueSelfSigned(certName, certName, certDomain).then(function(result) {
-										ui.hideModal();
-										if (result && result.error) {
-											ui.addNotification(null, E('p', {}, result.error), 'error');
-										} else {
-											ui.addNotification(null, E('p', {}, _('Self-signed certificate generated')), 'info');
-											setTimeout(function() { location.reload(); }, 500);
-										}
-									}).catch(function(err) {
-										ui.hideModal();
-										ui.addNotification(null, E('p', {}, _('Failed to generate self-signed certificate') + ': ' + err), 'error');
-									});
-								} else if (certType === 'acme') {
-									if (!certDomain) {
-										ui.addNotification(null, E('p', {}, _('Domain is required for ACME certificates')), 'error');
-										return;
-									}
-									if (!acmeAccountEmail) {
-										ui.addNotification(null, E('p', {}, _('ACME account email is required')), 'error');
-										return;
-									}
-									if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(acmeAccountEmail) || /@(example\.(com|net|org)|localhost)$/i.test(acmeAccountEmail)) {
-										ui.addNotification(null, E('p', {}, _('Invalid ACME account email')), 'error');
-										return;
-									}
-									if ((acmeMethod === 'webroot' || acmeMethod === 'standalone') && certDomain.includes('*')) {
-										ui.addNotification(null, E('p', {}, _('Wildcard domains are not supported for ACME certificates')), 'error');
-										return;
-									}
-									if (acmeMethod === 'dns') {
-										if (!dnsApi) {
-											ui.addNotification(null, E('p', {}, _('DNS API is required for DNS-01 validation')), 'error');
-											return;
-										}
-										if (!dnsCredentials) {
-											ui.addNotification(null, E('p', {}, _('DNS credentials are required for DNS-01 validation')), 'error');
-											return;
-										}
-									}
-									ui.showModal(_('Requesting...'), [E('p', {}, _('Please wait, ACME certificate issuance may take a while...'))]);
-									callAcmeIssue(certName, certDomain, acmeAccountEmail, acmeMethod, dnsApi, dnsCredentials, dnsWait, acmeAutoRenew).then(function(result) {
-										ui.hideModal();
-										if (result && result.error) {
-											var errMsg = _(result.error);
-											if (result.detail) errMsg += ': ' + result.detail;
-											ui.addNotification(null, E('p', {}, _('Failed to issue ACME certificate') + ': ' + errMsg), 'error');
-											return;
-										}
-										ui.addNotification(null, E('p', {}, _('ACME certificate requested')), 'info');
-										setTimeout(function() { location.reload(); }, 500);
-									}).catch(function(err) {
-										ui.hideModal();
-										ui.addNotification(null, E('p', {}, _('Failed to issue ACME certificate') + ': ' + err), 'error');
-									});
-								} else {
-									var certPemInput = E('textarea', { 'id': 'cert-pem', 'class': 'cbi-input-textarea nm-modal-textarea', 'rows': 10 });
-									var keyPemInput = E('textarea', { 'id': 'key-pem', 'class': 'cbi-input-textarea nm-modal-textarea', 'rows': 10 });
-									ui.showModal(_('Upload Certificate'), [
-									E('div', { 'class': 'cbi-value' }, [
-										E('label', { 'class': 'cbi-value-title' }, _('Certificate (PEM)')),
-										E('div', { 'class': 'cbi-value-field' }, certPemInput)
-									]),
-									E('div', { 'class': 'cbi-value' }, [
-										E('label', { 'class': 'cbi-value-title' }, _('Private Key (PEM)')),
-										E('div', { 'class': 'cbi-value-field' }, keyPemInput)
-									]),
-										E('div', { 'class': 'right' }, [
-											E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
-											E('button', {
-												'class': 'cbi-button cbi-button-apply',
-												'click': function() {
-													var certPem = certPemInput.value;
-													var keyPem = keyPemInput.value;
-													if (!certPem || !keyPem) {
-														ui.addNotification(null, E('p', {}, _('Both certificate and key are required')), 'error');
-														return;
-													}
-													ui.hideModal();
-													callUploadCert({ id: certName, name: certName, cert_content: certPem, key_content: keyPem, domain: certDomain }).then(function(result) {
-														if (result && result.error) {
-															ui.addNotification(null, E('p', {}, result.error), 'error');
-														} else {
-															ui.addNotification(null, E('p', {}, _('Certificate uploaded')), 'info');
-															setTimeout(function() { location.reload(); }, 500);
-														}
-													}).catch(function(err) {
-														ui.addNotification(null, E('p', {}, _('Failed to upload certificate') + ': ' + err), 'error');
-													});
-												}
-											}, '\u271A ' + _('Upload'))
-										])
-									]);
-								}
-							}
-						}, '\u271A ' + _('Create'))
-					])
-				]);
-				updateAcmeRows();
 			}
 		}, '\u271A ' + _('Add Certificate')));
+
+		headerSection.appendChild(E('button', {
+			'class': 'cbi-button',
+			'click': function() {
+				showGlobalAcmeSettingsModal();
+			}
+		}, '\u2699 ' + _('Global ACME & DNS Settings')));
 
 		container.appendChild(headerSection);
 
@@ -1063,9 +1556,9 @@ return view.extend({
 					_('No certificates configured.'))
 			]));
 			return utils.appendFooter(container, {
-			project: 'Nginx Manager',
-			repoUrl: 'https://github.com/hello-yunshu/luci-app-nginx-manager'
-		});
+				project: 'Nginx Manager',
+				repoUrl: 'https://github.com/hello-yunshu/luci-app-nginx-manager'
+			});
 		}
 
 		var table = E('table', { 'class': 'table nm-responsive-table' });
