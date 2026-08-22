@@ -573,6 +573,9 @@ msgstr "Please wait, ACME certificate issuance may take a while..."
 msgid "Please wait, ACME renewal may take a while..."
 msgstr "Please wait, ACME renewal may take a while..."
 
+msgid "Port"
+msgstr "Port"
+
 msgid "Plugin Version"
 msgstr "Plugin Version"
 
@@ -1754,3 +1757,9 @@ msgstr "Added only to this location. Use proxy_set_header, client_max_body_size,
 
 msgid "Disable a common header here before redefining that same header in Location Directives."
 msgstr "Disable a common header here before redefining that same header in Location Directives."
+
+msgid "Preserve Port"
+msgstr "Preserve Port"
+
+msgid "Domain Only"
+msgstr "Domain Only"

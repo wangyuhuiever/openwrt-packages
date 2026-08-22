@@ -174,7 +174,17 @@ return view.extend({
 				return E('li', {}, item);
 			})),
 			E('div', { 'class': 'right' }, [
-				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+				E('button', {
+					'type': 'button',
+					'class': 'btn',
+					'click': function(ev) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						ui.hideModal();
+					}
+				}, _('Close'))
 			])
 		]);
 	},
@@ -353,7 +363,17 @@ return view.extend({
 						ui.showModal(_('nginx -T Output'), [
 							editor.container,
 							E('div', { 'class': 'right' }, [
-								E('button', { 'type': 'button', 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+								E('button', {
+									'type': 'button',
+									'class': 'btn',
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
+								}, _('Close'))
 							])
 						]);
 					});
@@ -370,7 +390,17 @@ return view.extend({
 						ui.showModal(_('/etc/nginx/uci.conf.template'), [
 							editor.container,
 							E('div', { 'class': 'right' }, [
-								E('button', { 'type': 'button', 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+								E('button', {
+									'type': 'button',
+									'class': 'btn',
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
+								}, _('Close'))
 							])
 						]);
 					});
@@ -447,7 +477,17 @@ return view.extend({
 							ui.showModal(_('Confirm Save'), [
 								E('p', {}, _('Saving this file may break Nginx configuration. A backup will be created first. Continue?')),
 								E('div', { 'class': 'right' }, [
-									E('button', { 'type': 'button', 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+									E('button', {
+										'type': 'button',
+										'class': 'btn',
+										'click': function(ev) {
+											if (ev) {
+												ev.preventDefault();
+												ev.stopPropagation();
+											}
+											ui.hideModal();
+										}
+									}, _('Cancel')),
 									E('button', {
 										'type': 'button',
 										'class': 'cbi-button cbi-button-reset',

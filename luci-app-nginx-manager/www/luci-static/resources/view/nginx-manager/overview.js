@@ -209,7 +209,17 @@ return view.extend({
 					ui.showModal(_('Config Test Result'), [
 						editor.container,
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('OK'))
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('OK'))
 						])
 					]);
 				}).catch(function(err) {
@@ -228,7 +238,17 @@ return view.extend({
 					ui.showModal(_('View Full Config'), [
 						editor.container,
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('Close'))
 						])
 					]);
 				});

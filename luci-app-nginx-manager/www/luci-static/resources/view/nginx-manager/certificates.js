@@ -207,10 +207,23 @@ function showAcmeTaskModal(cert) {
 	var detailNode = E('pre', { 'class': 'nm-code-block' }, '');
 	var logNode = E('textarea', {
 		'class': 'cbi-input-textarea nm-log-area is-loading',
-		'rows': 20,
+		'rows': 16,
 		'readonly': 'readonly'
 	}, '');
 	var modalOpen = true;
+	var closeBtn = E('button', {
+		'type': 'button',
+		'class': 'btn',
+		'click': function(ev) {
+			if (ev) {
+				ev.preventDefault();
+				ev.stopPropagation();
+			}
+			modalOpen = false;
+			ui.hideModal();
+			location.reload();
+		}
+	}, _('Close'));
 
 	function setLogText(text) {
 		logNode.value = text;
@@ -220,17 +233,23 @@ function showAcmeTaskModal(cert) {
 		var status = (result && result.status) || cert.acme_status || 'unknown';
 		var displayStatus = status === 'running' ? 'acme_running'
 			: status === 'failed' ? 'acme_failed'
-			: status === 'success' ? 'valid'
+			: (status === 'success' || status === 'valid') ? 'valid'
 			: status;
 		statusNode.className = certStatusClass(displayStatus);
 		statusNode.textContent = certStatusLabel(displayStatus);
-		commandNode.textContent = (result && result.command) || '/etc/init.d/acme renew';
+		commandNode.textContent = (result && result.command) || '/usr/lib/acme/hook get';
+
+		if (status === 'running') {
+			closeBtn.textContent = _('Run in Background');
+		} else {
+			closeBtn.textContent = _('Close');
+		}
 
 		var detail = (result && result.detail) || '';
 		if (detail) {
 			detailNode.textContent = detail;
 		} else {
-			detailNode.textContent = _('No output yet.');
+			detailNode.textContent = status === 'running' ? _('ACME process running in background...') : _('No output yet.');
 		}
 
 		var log = (result && result.log) || '';
@@ -254,7 +273,7 @@ function showAcmeTaskModal(cert) {
 		});
 	}
 
-	ui.showModal(_('ACME Task'), [
+	ui.showModal(_('ACME Task Progress'), [
 		E('div', { 'class': 'cbi-value' }, [
 			E('label', { 'class': 'cbi-value-title' }, _('Status')),
 			E('div', { 'class': 'cbi-value-field' }, statusNode)
@@ -264,23 +283,23 @@ function showAcmeTaskModal(cert) {
 			E('div', { 'class': 'cbi-value-field' }, commandNode)
 		]),
 		E('div', { 'class': 'cbi-value nm-value-full' }, [
-			E('label', { 'class': 'cbi-value-title' }, _('Output')),
+			E('label', { 'class': 'cbi-value-title' }, _('Output / Status')),
 			E('div', { 'class': 'cbi-value-field' }, detailNode)
 		]),
 		E('div', { 'class': 'cbi-value nm-value-full' }, [
-			E('label', { 'class': 'cbi-value-title' }, _('Recent ACME Log')),
+			E('label', { 'class': 'cbi-value-title' }, _('Live ACME Output Log')),
 			E('div', { 'class': 'cbi-value-field' }, logNode)
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': refresh }, _('Refresh')),
 			E('button', {
+				'type': 'button',
 				'class': 'btn',
-				'click': function() {
-					modalOpen = false;
-					ui.hideModal();
-					location.reload();
+				'click': function(ev) {
+					if (ev) ev.preventDefault();
+					refresh();
 				}
-			}, _('Close'))
+			}, _('Refresh')),
+			closeBtn
 		])
 	]);
 
@@ -358,7 +377,17 @@ function showCertStatusModal(cert) {
 	}
 
 	var buttons = [
-		E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+		E('button', {
+			'type': 'button',
+			'class': 'btn',
+			'click': function(ev) {
+				if (ev) {
+					ev.preventDefault();
+					ev.stopPropagation();
+				}
+				ui.hideModal();
+			}
+		}, _('Close'))
 	];
 
 	if (cert.type === 'acme' && (cert.status === 'expired' || cert.status === 'expiring' || cert.status === 'missing')) {
@@ -382,18 +411,23 @@ function requestAcmeRenew(cert) {
 	function startRenew() {
 		ui.showModal(_('Renewing...'), [E('p', {}, _('Please wait, ACME renewal may take a while...'))]);
 		callAcmeRenew(cert.id, disableAutoRenew ? '1' : '0').then(function(result) {
-			ui.hideModal();
 			if (result && result.error) {
+				ui.hideModal();
 				var errMsg = _(result.error);
 				if (result.detail) errMsg += ': ' + result.detail;
-				ui.addNotification(null, E('p', {}, _('Failed to renew ACME certificate') + ': ' + errMsg), 'error');
+				utils.alert(_('Renew Failed'), errMsg, 'error');
 				return;
 			}
-			ui.addNotification(null, E('p', {}, _('ACME certificate requested')), 'info');
-			setTimeout(function() { location.reload(); }, 500);
+			showAcmeTaskModal({
+				id: cert.id,
+				name: cert.name || cert.id,
+				domain: cert.domain,
+				status: 'acme_running',
+				acme_status: 'running'
+			});
 		}).catch(function(err) {
 			ui.hideModal();
-			ui.addNotification(null, E('p', {}, _('Failed to renew ACME certificate') + ': ' + err), 'error');
+			utils.alert(_('Renew Failed'), String(err), 'error');
 		});
 	}
 
@@ -405,7 +439,17 @@ function requestAcmeRenew(cert) {
 	ui.showModal(_('Manual Renewal'), [
 		E('p', {}, _('Manual renewal will disable automatic renewal. You can re-enable it via Edit.')),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
@@ -632,7 +676,17 @@ function showEditCertModal(cert) {
 		]),
 		reissueNote,
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
@@ -658,20 +712,20 @@ function showEditCertModal(cert) {
 					newDnsWait = dnsWaitInput.value.trim();
 
 					if (!newDomain) {
-						ui.addNotification(null, E('p', {}, _('Domain is required')), 'error');
+						utils.alert(_('Validation Error'), _('Domain is required'), 'error');
 						return;
 					}
 					if (!newEmail) {
-						ui.addNotification(null, E('p', {}, _('ACME account email is required')), 'error');
+						utils.alert(_('Validation Error'), _('ACME account email is required'), 'error');
 						return;
 					}
 					if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(newEmail) || /@(example\.(com|net|org)|localhost)$/i.test(newEmail)) {
-						ui.addNotification(null, E('p', {}, _('Invalid ACME account email')), 'error');
+						utils.alert(_('Validation Error'), _('Invalid ACME account email'), 'error');
 						return;
 					}
 					if (newMethod === 'dns') {
 						if (!newDnsApi) {
-							ui.addNotification(null, E('p', {}, _('DNS API is required for DNS-01 validation')), 'error');
+							utils.alert(_('Validation Error'), _('DNS API is required for DNS-01 validation'), 'error');
 							return;
 						}
 					}
@@ -690,11 +744,19 @@ function showEditCertModal(cert) {
 							ui.showModal(_('Re-issue Required'), [
 								E('p', {}, _('The changes you made require re-issuing the certificate. Would you like to re-issue now?')),
 								E('div', { 'class': 'right' }, [
-									E('button', { 'class': 'btn', 'click': function() {
-										ui.hideModal();
-										ui.addNotification(null, E('p', {}, _('Settings saved. Certificate will be re-issued on next renewal.')), 'info');
-										setTimeout(function() { location.reload(); }, 500);
-									} }, _('Later')),
+									E('button', {
+										'type': 'button',
+										'class': 'btn',
+										'click': function(ev) {
+											if (ev) {
+												ev.preventDefault();
+												ev.stopPropagation();
+											}
+											ui.hideModal();
+											ui.addNotification(null, E('p', {}, _('Settings saved. Certificate will be re-issued on next renewal.')), 'info');
+											setTimeout(function() { location.reload(); }, 500);
+										}
+									}, _('Later')),
 									E('button', {
 										'class': 'cbi-button cbi-button-apply',
 										'click': function() {
@@ -809,7 +871,17 @@ function showGlobalAcmeSettingsModal() {
 			]),
 			credsContainer,
 			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+				E('button', {
+					'type': 'button',
+					'class': 'btn',
+					'click': function(ev) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						ui.hideModal();
+					}
+				}, _('Cancel')),
 				E('button', {
 					'class': 'cbi-button cbi-button-apply',
 					'click': function() {
@@ -826,7 +898,7 @@ function showGlobalAcmeSettingsModal() {
 						var credStr = lines.join('\n');
 
 						if (newEmail && (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(newEmail) || /@(example\.(com|net|org)|localhost)$/i.test(newEmail))) {
-							ui.addNotification(null, E('p', {}, _('Invalid ACME account email')), 'error');
+							utils.alert(_('Validation Error'), _('Invalid ACME account email'), 'error');
 							return;
 						}
 
@@ -852,7 +924,17 @@ function showGlobalAcmeSettingsModal() {
 		ui.showModal(_('Global ACME & DNS Settings'), [
 			E('p', { 'class': 'alert-message error' }, String(err)),
 			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+				E('button', {
+					'type': 'button',
+					'class': 'btn',
+					'click': function(ev) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						ui.hideModal();
+					}
+				}, _('Close'))
 			])
 		]);
 	});
@@ -868,7 +950,17 @@ function showScanAcmeModal() {
 					E('p', { 'class': 'nm-empty-state' }, _('No ACME certificates found in /etc/ssl/acme or acme.sh directories.'))
 				]),
 				E('div', { 'class': 'right' }, [
-					E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+					E('button', {
+						'type': 'button',
+						'class': 'btn',
+						'click': function(ev) {
+							if (ev) {
+								ev.preventDefault();
+								ev.stopPropagation();
+							}
+							ui.hideModal();
+						}
+					}, _('Close'))
 				])
 			]);
 			return;
@@ -969,21 +1061,31 @@ function showScanAcmeModal() {
 			table,
 			nameRow,
 			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+				E('button', {
+					'type': 'button',
+					'class': 'btn',
+					'click': function(ev) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						ui.hideModal();
+					}
+				}, _('Cancel')),
 				E('button', {
 					'class': 'cbi-button cbi-button-apply',
 					'click': function() {
 						if (!selectedCert) {
-							ui.addNotification(null, E('p', {}, _('Please select an ACME certificate to import')), 'error');
+							utils.alert(_('Validation Error'), _('Please select an ACME certificate to import'), 'error');
 							return;
 						}
 						var name = certNameInput.value.trim();
 						if (!name) {
-							ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
+							utils.alert(_('Validation Error'), _('Certificate name is required'), 'error');
 							return;
 						}
 						if (!utils.NAME_PATTERN.test(name)) {
-							ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
+							utils.alert(_('Validation Error'), _('Invalid certificate name'), 'error');
 							return;
 						}
 						ui.hideModal();
@@ -1009,7 +1111,17 @@ function showScanAcmeModal() {
 		ui.showModal(_('Scan ACME Certificates'), [
 			E('p', { 'class': 'alert-message error' }, String(err)),
 			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+				E('button', {
+					'type': 'button',
+					'class': 'btn',
+					'click': function(ev) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						ui.hideModal();
+					}
+				}, _('Close'))
 			])
 		]);
 	});
@@ -1335,7 +1447,17 @@ function showAddCertModal(globalConfig) {
 			])
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
@@ -1349,15 +1471,15 @@ function showAddCertModal(globalConfig) {
 
 					if (certType === 'acme_scan') {
 						if (!selectedScanCert) {
-							ui.addNotification(null, E('p', {}, _('Please select an ACME certificate to import')), 'error');
+							utils.alert(_('Validation Error'), _('Please select an ACME certificate to import'), 'error');
 							return;
 						}
 						if (!certName) {
-							ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
+							utils.alert(_('Validation Error'), _('Certificate name is required'), 'error');
 							return;
 						}
 						if (!utils.NAME_PATTERN.test(certName)) {
-							ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
+							utils.alert(_('Validation Error'), _('Invalid certificate name'), 'error');
 							return;
 						}
 						ui.hideModal();
@@ -1398,11 +1520,11 @@ function showAddCertModal(globalConfig) {
 					dnsWait = dnsWaitInput.value.trim();
 
 					if (!certName) {
-						ui.addNotification(null, E('p', {}, _('Certificate name is required')), 'error');
+						utils.alert(_('Validation Error'), _('Certificate name is required'), 'error');
 						return;
 					}
 					if (!utils.NAME_PATTERN.test(certName)) {
-						ui.addNotification(null, E('p', {}, _('Invalid certificate name')), 'error');
+						utils.alert(_('Validation Error'), _('Invalid certificate name'), 'error');
 						return;
 					}
 
@@ -1410,63 +1532,68 @@ function showAddCertModal(globalConfig) {
 
 					if (certType === 'self_signed') {
 						if (!certDomain) {
-							ui.addNotification(null, E('p', {}, _('Domain is required for self-signed certificates')), 'error');
+							utils.alert(_('Validation Error'), _('Domain is required for self-signed certificates'), 'error');
 							return;
 						}
 						ui.showModal(_('Generating...'), [E('p', {}, _('Please wait...'))]);
 						callIssueSelfSigned(certName, certName, certDomain).then(function(result) {
 							ui.hideModal();
 							if (result && result.error) {
-								ui.addNotification(null, E('p', {}, result.error), 'error');
+								utils.alert(_('Error'), result.error, 'error');
 							} else {
 								ui.addNotification(null, E('p', {}, _('Self-signed certificate generated')), 'info');
 								setTimeout(function() { location.reload(); }, 500);
 							}
 						}).catch(function(err) {
 							ui.hideModal();
-							ui.addNotification(null, E('p', {}, _('Failed to generate self-signed certificate') + ': ' + err), 'error');
+							utils.alert(_('Error'), _('Failed to generate self-signed certificate') + ': ' + err, 'error');
 						});
 					} else if (certType === 'acme') {
 						if (!certDomain) {
-							ui.addNotification(null, E('p', {}, _('Domain is required for ACME certificates')), 'error');
+							utils.alert(_('Validation Error'), _('Domain is required for ACME certificates'), 'error');
 							return;
 						}
 						if (!acmeAccountEmail) {
-							ui.addNotification(null, E('p', {}, _('ACME account email is required')), 'error');
+							utils.alert(_('Validation Error'), _('ACME account email is required'), 'error');
 							return;
 						}
 						if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(acmeAccountEmail) || /@(example\.(com|net|org)|localhost)$/i.test(acmeAccountEmail)) {
-							ui.addNotification(null, E('p', {}, _('Invalid ACME account email')), 'error');
+							utils.alert(_('Validation Error'), _('Invalid ACME account email'), 'error');
 							return;
 						}
 						if ((acmeMethod === 'webroot' || acmeMethod === 'standalone') && certDomain.includes('*')) {
-							ui.addNotification(null, E('p', {}, _('Wildcard domains are not supported for ACME certificates')), 'error');
+							utils.alert(_('Validation Error'), _('Wildcard domains are not supported for ACME certificates'), 'error');
 							return;
 						}
 						if (acmeMethod === 'dns') {
 							if (!dnsApi) {
-								ui.addNotification(null, E('p', {}, _('DNS API is required for DNS-01 validation')), 'error');
+								utils.alert(_('Validation Error'), _('DNS API is required for DNS-01 validation'), 'error');
 								return;
 							}
 							if (!dnsCredentials) {
-								ui.addNotification(null, E('p', {}, _('DNS credentials are required for DNS-01 validation')), 'error');
+								utils.alert(_('Validation Error'), _('DNS credentials are required for DNS-01 validation'), 'error');
 								return;
 							}
 						}
 						ui.showModal(_('Requesting...'), [E('p', {}, _('Please wait, ACME certificate issuance may take a while...'))]);
 						callAcmeIssue(certName, certDomain, acmeAccountEmail, acmeMethod, dnsApi, dnsCredentials, dnsWait, acmeAutoRenew).then(function(result) {
-							ui.hideModal();
 							if (result && result.error) {
+								ui.hideModal();
 								var errMsg = _(result.error);
 								if (result.detail) errMsg += ': ' + result.detail;
-								ui.addNotification(null, E('p', {}, _('Failed to issue ACME certificate') + ': ' + errMsg), 'error');
+								utils.alert(_('Issue Failed'), errMsg, 'error');
 								return;
 							}
-							ui.addNotification(null, E('p', {}, _('ACME certificate requested')), 'info');
-							setTimeout(function() { location.reload(); }, 500);
+							showAcmeTaskModal({
+								id: (result && result.task_id) || certName,
+								name: certName,
+								domain: certDomain,
+								status: 'acme_running',
+								acme_status: 'running'
+							});
 						}).catch(function(err) {
 							ui.hideModal();
-							ui.addNotification(null, E('p', {}, _('Failed to issue ACME certificate') + ': ' + err), 'error');
+							utils.alert(_('Issue Failed'), String(err), 'error');
 						});
 					} else {
 						var certPemInput = E('textarea', { 'id': 'cert-pem', 'class': 'cbi-input-textarea nm-modal-textarea', 'rows': 10 });
@@ -1481,14 +1608,24 @@ function showAddCertModal(globalConfig) {
 								E('div', { 'class': 'cbi-value-field' }, keyPemInput)
 							]),
 							E('div', { 'class': 'right' }, [
-								E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+								E('button', {
+									'type': 'button',
+									'class': 'btn',
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
+								}, _('Cancel')),
 								E('button', {
 									'class': 'cbi-button cbi-button-apply',
 									'click': function() {
 										var certPem = certPemInput.value;
 										var keyPem = keyPemInput.value;
 										if (!certPem || !keyPem) {
-											ui.addNotification(null, E('p', {}, _('Both certificate and key are required')), 'error');
+											utils.alert(_('Validation Error'), _('Both certificate and key are required'), 'error');
 											return;
 										}
 										ui.hideModal();
@@ -1607,7 +1744,17 @@ return view.extend({
 					ui.showModal(_('Confirm Delete'), [
 						E('p', {}, _('Are you sure you want to delete this certificate?')),
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('Cancel')),
 							E('button', {
 								'class': 'cbi-button cbi-button-reset',
 								'click': function() {

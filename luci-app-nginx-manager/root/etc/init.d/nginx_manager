@@ -63,7 +63,7 @@ validate_nginx_manager_site() {
         'ssl_protocols:string' \
         'ssl_ciphers:string' \
         'hsts_max_age:string' \
-        'access_log:bool:0' \
+        'access_log:bool:1' \
         'error_log:bool:1' \
         'custom_server_block:string' \
         'redirect_target:string' \
@@ -83,7 +83,7 @@ validate_nginx_manager_cert() {
 }
 
 start_service() {
-    "${PROG}" generate >/dev/null 2>&1
+    "${PROG}" apply >/dev/null 2>&1
 }
 
 stop_service() {

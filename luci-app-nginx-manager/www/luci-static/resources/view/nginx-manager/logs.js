@@ -245,7 +245,17 @@ return view.extend({
 			ui.showModal(_('Clear All Logs'), [
 				E('p', {}, _('Are you sure you want to clear ALL access and error logs for all sites? This cannot be undone.')),
 				E('div', { 'class': 'right' }, [
-					E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+					E('button', {
+						'type': 'button',
+						'class': 'btn',
+						'click': function(ev) {
+							if (ev) {
+								ev.preventDefault();
+								ev.stopPropagation();
+							}
+							ui.hideModal();
+						}
+					}, _('Cancel')),
 					E('button', {
 						'class': 'cbi-button cbi-button-reset',
 						'click': function() {

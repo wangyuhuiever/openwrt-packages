@@ -247,7 +247,7 @@ function fileIconNode(path, entry) {
 }
 
 function showError(prefix, err) {
-	ui.addNotification(null, E('p', {}, prefix + ': ' + (err && err.message ? err.message : err)), 'error');
+	utils.alert(prefix, (err && err.message ? err.message : String(err)), 'error');
 }
 
 function showPathConfirmModal(title, message, path, actionLabel, buttonClass, callback) {
@@ -265,12 +265,22 @@ function showPathConfirmModal(title, message, path, actionLabel, buttonClass, ca
 			E('div', { 'class': 'cbi-value-field' }, [input])
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': buttonClass,
 				'click': function() {
 					if (input.value.trim() !== path) {
-						ui.addNotification(null, E('p', {}, _('Path confirmation does not match')), 'error');
+						utils.alert(_('Validation Error'), _('Path confirmation does not match'), 'error');
 						return;
 					}
 					callback();
@@ -365,13 +375,23 @@ function showChmodModal(path, currentPerms) {
 			E('div', { 'class': 'cbi-value-field nm-perm-table-wrap' }, [table])
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
 					var newPerms = octalInput.value.replace(/[^0-7]/g, '');
 					if (!/^[0-7]{3,4}$/.test(newPerms)) {
-						ui.addNotification(null, E('p', {}, _('Invalid permissions')), 'error');
+						utils.alert(_('Validation Error'), _('Invalid permissions'), 'error');
 						return;
 					}
 
@@ -633,7 +653,17 @@ function openEditor(path, entry) {
 		ui.showModal(_('Edit') + ' - ' + path, [
 			editorContainer,
 			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+				E('button', {
+					'type': 'button',
+					'class': 'btn',
+					'click': function(ev) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						ui.hideModal();
+					}
+				}, _('Cancel')),
 				E('button', {
 					'class': 'cbi-button cbi-button-apply',
 					'click': function() {
@@ -669,14 +699,24 @@ function showNewFileModal() {
 			E('div', { 'class': 'cbi-value-field' }, [input])
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
 					var name = input.value.trim();
 					var validationError = validateEntryName(name);
 					if (validationError) {
-						ui.addNotification(null, E('p', {}, !name ? _('File name is required') : validationError), 'error');
+						utils.alert(_('Validation Error'), !name ? _('File name is required') : validationError, 'error');
 						return;
 					}
 					var path = joinPath(currentPath, name);
@@ -709,14 +749,24 @@ function showNewDirModal() {
 			E('div', { 'class': 'cbi-value-field' }, [input])
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
 					var name = input.value.trim();
 					var validationError = validateEntryName(name);
 					if (validationError) {
-						ui.addNotification(null, E('p', {}, !name ? _('Directory name is required') : validationError), 'error');
+						utils.alert(_('Validation Error'), !name ? _('Directory name is required') : validationError, 'error');
 						return;
 					}
 					var path = joinPath(currentPath, name);
@@ -749,14 +799,24 @@ function showRenameModal(path, oldName) {
 			E('div', { 'class': 'cbi-value-field' }, [input])
 		]),
 		E('div', { 'class': 'right' }, [
-			E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+				}
+			}, _('Cancel')),
 			E('button', {
 				'class': 'cbi-button cbi-button-apply',
 				'click': function() {
 					var name = input.value.trim();
 					var validationError = validateEntryName(name);
 					if (validationError) {
-						ui.addNotification(null, E('p', {}, validationError), 'error');
+						utils.alert(_('Validation Error'), validationError, 'error');
 						return;
 					}
 					var target = joinPath(parentPath(path), name);

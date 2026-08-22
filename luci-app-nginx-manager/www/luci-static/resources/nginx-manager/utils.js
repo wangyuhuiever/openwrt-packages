@@ -3,6 +3,7 @@
 
 'require baseclass';
 'require uci';
+'require ui';
 
 var FOOTER_VERSION = '@PKG_VERSION@';
 
@@ -808,6 +809,80 @@ function createCodeEditor(content, path, options) {
 	};
 }
 
+function showModal(title, children, className) {
+	return ui.showModal(title, children, className);
+}
+
+function hideModal() {
+	return ui.hideModal();
+}
+
+function modalAlert(title, message, type, onClose) {
+	type = type || 'error';
+	var alertClass = 'alert-message ' + (type === 'error' ? 'error' : type === 'warning' ? 'warning' : type === 'success' ? 'success' : 'info');
+	var contentNode = typeof message === 'string' ? E('p', { 'style': 'margin:0; font-size:1.05em;' }, message) : message;
+
+	return ui.showModal(title || _('Notification'), [
+		E('div', { 'class': alertClass, 'style': 'margin-bottom: 1em;' }, [contentNode]),
+		E('div', { 'class': 'right' }, [
+			E('button', {
+				'type': 'button',
+				'class': type === 'error' ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-apply',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+					if (typeof onClose === 'function')
+						onClose();
+				}
+			}, _('OK'))
+		])
+	]);
+}
+
+function modalConfirm(title, message, onConfirm, onCancel, confirmText, cancelText, isDanger) {
+	var contentNode = typeof message === 'string' ? E('p', {}, message) : message;
+	return ui.showModal(title || _('Confirm'), [
+		contentNode,
+		E('div', { 'class': 'right' }, [
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+					if (typeof onCancel === 'function')
+						onCancel();
+				}
+			}, cancelText || _('Cancel')),
+			E('button', {
+				'type': 'button',
+				'class': isDanger ? 'cbi-button cbi-button-reset' : 'cbi-button cbi-button-apply',
+				'click': function(ev) {
+					if (ev) {
+						ev.preventDefault();
+						ev.stopPropagation();
+					}
+					ui.hideModal();
+					if (typeof onConfirm === 'function')
+						onConfirm();
+				}
+			}, confirmText || _('Confirm'))
+		])
+	]);
+}
+
+function modalLoading(title, message) {
+	return ui.showModal(title || _('Please wait...'), [
+		E('p', { 'class': 'is-loading' }, message || _('Processing...'))
+	]);
+}
+
 return baseclass.extend({
 	loadSharedCSS: loadSharedCSS,
 	renderFooter: renderFooter,
@@ -822,5 +897,10 @@ return baseclass.extend({
 	codeSyntax: codeSyntax,
 	isCodeFile: isCodeFile,
 	highlightCode: highlightCode,
-	createCodeEditor: createCodeEditor
+	createCodeEditor: createCodeEditor,
+	showModal: showModal,
+	hideModal: hideModal,
+	alert: modalAlert,
+	confirm: modalConfirm,
+	loading: modalLoading
 });

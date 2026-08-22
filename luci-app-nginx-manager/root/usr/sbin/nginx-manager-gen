@@ -401,7 +401,17 @@ generate_proxy_headers() {
 	local proxy_xfp="$3"
 	local proxy_xri="$4"
 
-	[ "${proxy_host}" = "1" ] && echo "        proxy_set_header Host \$host;"
+	case "${proxy_host}" in
+		host|'$host')
+			echo "        proxy_set_header Host \$host;"
+			;;
+		off|0|none)
+			;;
+		*)
+			# Default is $http_host (preserving port e.g. 42443 on routers)
+			echo "        proxy_set_header Host \$http_host;"
+			;;
+	esac
 	[ "${proxy_xff}" = "1" ] && echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;"
 	[ "${proxy_xri}" = "1" ] && echo "        proxy_set_header X-Real-IP \$remote_addr;"
 	[ "${proxy_xfp}" = "1" ] && echo "        proxy_set_header X-Forwarded-Proto \$scheme;"
@@ -435,7 +445,16 @@ generate_grpc_headers() {
 	local proxy_host="$1"
 	local proxy_xri="$4"
 
-	[ "${proxy_host}" = "1" ] && echo "        grpc_set_header Host \$host;"
+	case "${proxy_host}" in
+		host|'$host')
+			echo "        grpc_set_header Host \$host;"
+			;;
+		off|0|none)
+			;;
+		*)
+			echo "        grpc_set_header Host \$http_host;"
+			;;
+	esac
 	[ "${proxy_xri}" = "1" ] && echo "        grpc_set_header X-Real-IP \$remote_addr;"
 }
 
@@ -1563,12 +1582,62 @@ do_start() {
 		"$(json_escape "${start_output}")"
 }
 
+rotate_logs() {
+	local max_size_kb="${1:-5120}" # default 5MB max per log file
+	local max_backups="${2:-2}"    # keep at most 2 backups (.1, .2)
+	local log_dir="/var/log/nginx"
+	[ -d "${log_dir}" ] || return 0
+
+	local rotated=0
+	for log_file in "${log_dir}"/*.log; do
+		[ -f "${log_file}" ] || continue
+		local file_size_kb
+		file_size_kb="$(du -k "${log_file}" 2>/dev/null | awk '{print $1}')"
+		[ -n "${file_size_kb}" ] || continue
+		if [ "${file_size_kb}" -ge "${max_size_kb}" ]; then
+			local i="${max_backups}"
+			while [ "${i}" -ge 2 ]; do
+				local prev=$((i - 1))
+				[ -f "${log_file}.${prev}" ] && mv -f "${log_file}.${prev}" "${log_file}.${i}"
+				i="${prev}"
+			done
+			mv -f "${log_file}" "${log_file}.1"
+			: > "${log_file}"
+			rotated=1
+			log_info "Rotated log: ${log_file} (${file_size_kb}KB >= ${max_size_kb}KB)"
+		fi
+	done
+
+	if [ "${rotated}" -eq 1 ]; then
+		if [ -f /var/run/nginx.pid ]; then
+			kill -USR1 "$(cat /var/run/nginx.pid)" 2>/dev/null || true
+		else
+			killall -USR1 nginx 2>/dev/null || true
+		fi
+	fi
+}
+
+ensure_logrotate_cron() {
+	local cron_file="/etc/crontabs/root"
+	local cron_cmd="/usr/sbin/nginx-manager-gen rotate-logs"
+	local cron_line="0 * * * * ${cron_cmd} >/dev/null 2>&1"
+	mkdir -p /etc/crontabs
+	touch "${cron_file}"
+
+	if ! grep -Fq "${cron_cmd}" "${cron_file}"; then
+		echo "${cron_line}" >> "${cron_file}"
+		/etc/init.d/cron reload >/dev/null 2>&1 || true
+	fi
+}
+
 case "$1" in
 	generate)
 		generate_all
 		;;
 	apply)
 		apply_config
+		ensure_logrotate_cron
+		rotate_logs
 		;;
 	render)
 		[ -n "$2" ] && render_single_site "$2"
@@ -1579,6 +1648,9 @@ case "$1" in
 	backup)
 		load_global_config
 		create_backup 1
+		;;
+	rotate-logs)
+		rotate_logs "$2" "$3"
 		;;
 	--status)
 		do_status
@@ -1599,7 +1671,7 @@ case "$1" in
 		do_start
 		;;
 	*)
-		echo "Usage: $0 {generate|apply|render <section>|test|backup|--status|--check-env|--test-config|--reload|--restart|--start}" >&2
+		echo "Usage: $0 {generate|apply|render <section>|test|backup|rotate-logs|--status|--check-env|--test-config|--reload|--restart|--start}" >&2
 		exit 1
 		;;
 esac

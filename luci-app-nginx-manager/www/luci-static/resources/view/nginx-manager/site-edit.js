@@ -287,7 +287,32 @@ return view.extend({
 					if (ev.target !== input)
 						input.checked = !input.checked;
 				}
-			}, [input, E('span', {}, label)]);
+			}, [E('span', {}, label), input]);
+		}
+
+		function makeHostSelect(value, dataAttr) {
+			var currentVal = value || 'http_host';
+			if (currentVal === '1' || currentVal === '$http_host') currentVal = 'http_host';
+			if (currentVal === '0') currentVal = 'off';
+			if (currentVal === '$host') currentVal = 'host';
+
+			var select = E('select', {
+				'class': 'cbi-input-select',
+				'style': 'width:auto; margin:0 0.4em 0 0.2em; padding:2px 6px; font-size:90%; height:auto;'
+			}, [
+				E('option', { 'value': 'http_host' }, '$http_host (' + _('Preserve Port') + ')'),
+				E('option', { 'value': 'host' }, '$host (' + _('Domain Only') + ')'),
+				E('option', { 'value': 'off' }, _('Disabled'))
+			]);
+			select.setAttribute(dataAttr, '1');
+			select.value = currentVal;
+			return E('div', {
+				'class': 'nm-location-toggle',
+				'style': 'display:inline-flex; align-items:center; gap:0.25em;'
+			}, [
+				E('span', {}, 'Host:'),
+				select
+			]);
 		}
 
 		function addLocationCard(location, isPrimary) {
@@ -305,14 +330,14 @@ return view.extend({
 			websocketInput.checked = location.websocket === '1';
 			directivesInput.value = location.directives || '';
 			var defaultHeaders = {
-				proxy_host: (!isNew && site && site.proxy_host) || '1',
+				proxy_host: (!isNew && site && site.proxy_host) || 'http_host',
 				proxy_xff: (!isNew && site && site.proxy_xff) || '1',
 				proxy_xfp: (!isNew && site && site.proxy_xfp) || '1',
 				proxy_xri: (!isNew && site && site.proxy_xri) || '1'
 			};
-			var headerRow = E('div', { 'class': 'nm-location-header-row' }, [
-				E('span', { 'style': 'color:#666;' }, _('Headers:')),
-				makeToggle('Host', location.proxy_host || defaultHeaders.proxy_host, 'data-location-proxy-host'),
+			var headerRow = E('div', { 'class': 'nm-location-header-row', 'style': 'display:flex; flex-wrap:wrap; align-items:center; gap:0.4em; margin-top:0.35em;' }, [
+				E('span', { 'style': 'color:#666; margin-right:0.2em;' }, _('Headers:')),
+				makeHostSelect(location.proxy_host || defaultHeaders.proxy_host, 'data-location-proxy-host'),
 				makeToggle('X-Forwarded-For', location.proxy_xff || defaultHeaders.proxy_xff, 'data-location-proxy-xff'),
 				makeToggle('X-Forwarded-Proto', location.proxy_xfp || defaultHeaders.proxy_xfp, 'data-location-proxy-xfp'),
 				makeToggle('X-Real-IP', location.proxy_xri || defaultHeaders.proxy_xri, 'data-location-proxy-xri')
@@ -424,7 +449,7 @@ return view.extend({
 		loggingSection.appendChild(E('h3', {}, _('Logging')));
 
 		loggingSection.appendChild(makeFlag('opt-access_log', _('Access Log'),
-			!isNew && site ? site.access_log === '1' : false));
+			!isNew && site ? site.access_log === '1' : true));
 
 		loggingSection.appendChild(makeFlag('opt-error_log', _('Error Log'),
 			!isNew && site ? site.error_log === '1' : true));
@@ -537,7 +562,7 @@ return view.extend({
 							'style': 'display:none;',
 							'click': function() {
 								if (!configFilePath) {
-									ui.addNotification(null, E('p', {}, _('Config file path not available')), 'error');
+									utils.alert(_('Error'), _('Config file path not available'), 'error');
 									return;
 								}
 								ui.showModal(_('Confirm Save'), [
@@ -545,19 +570,29 @@ return view.extend({
 									E('p', {}, _('A backup will be created before saving.')),
 									E('p', { 'style': 'margin-top:0.5em;' }, _('Direct edits are temporary and will be overwritten whenever managed configuration is applied. Use Custom Location Directives for persistent reverse-proxy changes.')),
 									E('div', { 'class': 'right' }, [
-										E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+										E('button', {
+											'type': 'button',
+											'class': 'btn',
+											'click': function(ev) {
+												if (ev) {
+													ev.preventDefault();
+													ev.stopPropagation();
+												}
+												ui.hideModal();
+											}
+										}, _('Cancel')),
 										E('button', {
 											'class': 'cbi-button cbi-button-apply',
 											'click': function() {
 												ui.hideModal();
 												callSaveFile(configFilePath, editor.textarea.value).then(function(r) {
 													if (r && r.error) {
-														ui.addNotification(null, E('p', {}, _('Save failed') + ': ' + r.error), 'error');
+														utils.alert(_('Save failed'), r.error, 'error');
 													} else {
 														ui.addNotification(null, E('p', {}, _('Config file saved successfully')), 'info');
 													}
 												}).catch(function(err) {
-													ui.addNotification(null, E('p', {}, _('Save failed') + ': ' + (err.message || err)), 'error');
+													utils.alert(_('Save failed'), (err.message || err), 'error');
 												});
 											}
 										}, _('Save'))
@@ -572,8 +607,15 @@ return view.extend({
 								editBtn,
 								saveBtn,
 								E('button', {
+									'type': 'button',
 									'class': 'btn',
-									'click': function() { ui.hideModal(); }
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
 								}, _('Close'))
 							])
 						]);
@@ -632,11 +674,11 @@ return view.extend({
 			data.name                = document.getElementById('opt-name').value.trim();
 
 			if (!data.name) {
-				ui.addNotification(null, E('p', {}, _('Site name is required')), 'error');
+				utils.alert(_('Validation Error'), _('Site name is required'), 'error');
 				return;
 			}
 			if (!utils.NAME_PATTERN.test(data.name)) {
-				ui.addNotification(null, E('p', {}, _('Invalid site name')), 'error');
+				utils.alert(_('Validation Error'), _('Invalid site name'), 'error');
 				return;
 			}
 			data.mode                = document.getElementById('opt-mode').value;
@@ -669,17 +711,18 @@ return view.extend({
 				var locationBackend = locationRows[li].querySelector('[data-location-backend]').value.trim();
 				var locationWebsocket = locationRows[li].querySelector('[data-location-websocket]').checked ? '1' : '0';
 				var locationDirectives = locationRows[li].querySelector('[data-location-directives]').value;
-				var locationProxyHost = locationRows[li].querySelector('[data-location-proxy-host]').checked ? '1' : '0';
+				var hostSelect = locationRows[li].querySelector('[data-location-proxy-host]');
+				var locationProxyHost = hostSelect ? hostSelect.value : 'http_host';
 				var locationProxyXff = locationRows[li].querySelector('[data-location-proxy-xff]').checked ? '1' : '0';
 				var locationProxyXfp = locationRows[li].querySelector('[data-location-proxy-xfp]').checked ? '1' : '0';
 				var locationProxyXri = locationRows[li].querySelector('[data-location-proxy-xri]').checked ? '1' : '0';
 				if (data.mode !== 'reverse_proxy') break;
 				if (!locationPath || !locationBackend || locationPaths[locationPath] || !/^\/[A-Za-z0-9._~!$&()*+,;=:@%/-]*$/.test(locationPath)) {
-					ui.addNotification(null, E('p', {}, _('Each location needs a unique path and backend address')), 'error');
+					utils.alert(_('Validation Error'), _('Each location needs a unique path and backend address'), 'error');
 					return;
 				}
 				if (!/^(https?:\/\/|unix:|grpcs?:\/\/)/.test(locationBackend)) {
-					ui.addNotification(null, E('p', {}, _('Location backend must use http://, https://, unix:, grpc://, or grpcs://')), 'error');
+					utils.alert(_('Validation Error'), _('Location backend must use http://, https://, unix:, grpc://, or grpcs://'), 'error');
 					return;
 				}
 				locationPaths[locationPath] = true;
@@ -694,7 +737,8 @@ return view.extend({
 			data.grpc_path = '';
 			data.grpc_pass = '';
 			data.custom_proxy_headers = '';
-			data.proxy_host = firstLocation && firstLocation.querySelector('[data-location-proxy-host]').checked ? '1' : '0';
+			var firstHostSelect = firstLocation ? firstLocation.querySelector('[data-location-proxy-host]') : null;
+			data.proxy_host = firstHostSelect ? firstHostSelect.value : 'http_host';
 			data.proxy_xff = firstLocation && firstLocation.querySelector('[data-location-proxy-xff]').checked ? '1' : '0';
 			data.proxy_xfp = firstLocation && firstLocation.querySelector('[data-location-proxy-xfp]').checked ? '1' : '0';
 			data.proxy_xri = firstLocation && firstLocation.querySelector('[data-location-proxy-xri]').checked ? '1' : '0';

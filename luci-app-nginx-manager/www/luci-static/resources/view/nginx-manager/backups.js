@@ -88,7 +88,7 @@ return view.extend({
 						var value = input ? input.value.trim() : '';
 
 						if (!/^[0-9]+$/.test(value) || +value < 1 || +value > 100) {
-							ui.addNotification(null, E('p', {}, _('Maximum backups must be between 1 and 100')), 'error');
+							utils.alert(_('Validation Error'), _('Maximum backups must be between 1 and 100'), 'error');
 							return;
 						}
 
@@ -156,7 +156,17 @@ return view.extend({
 						ui.showModal(_('Compare with Current'), [
 							diffEditor.container,
 							E('div', { 'class': 'right' }, [
-								E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Close'))
+								E('button', {
+									'type': 'button',
+									'class': 'btn',
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
+								}, _('Close'))
 							])
 						]);
 					});
@@ -170,7 +180,17 @@ return view.extend({
 						E('div', { 'class': 'alert-message warning' },
 							_('Are you sure you want to restore this backup? A backup of the current configuration will be created first.')),
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('Cancel')),
 							E('button', {
 								'class': 'cbi-button cbi-button-apply',
 								'click': function() {
@@ -198,7 +218,17 @@ return view.extend({
 					ui.showModal(_('Confirm Delete'), [
 						E('p', {}, _('Are you sure you want to delete this backup?')),
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('Cancel')),
 							E('button', {
 								'class': 'cbi-button cbi-button-reset',
 								'click': function() {

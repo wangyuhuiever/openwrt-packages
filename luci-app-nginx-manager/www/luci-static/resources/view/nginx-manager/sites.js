@@ -153,18 +153,28 @@ return view.extend({
 						modeSelect
 					]),
 					E('div', { 'class': 'right' }, [
-						E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+						E('button', {
+							'type': 'button',
+							'class': 'btn',
+							'click': function(ev) {
+								if (ev) {
+									ev.preventDefault();
+									ev.stopPropagation();
+								}
+								ui.hideModal();
+							}
+						}, _('Cancel')),
 						E('button', {
 							'class': 'cbi-button cbi-button-apply',
 							'click': function() {
 								var name = nameInput.value.trim();
 								var mode = modeSelect.value;
 								if (!name) {
-									ui.addNotification(null, E('p', {}, _('Site name is required')), 'error');
+									utils.alert(_('Validation Error'), _('Site name is required'), 'error');
 									return;
 								}
 								if (!utils.NAME_PATTERN.test(name)) {
-									ui.addNotification(null, E('p', {}, _('Invalid site name')), 'error');
+									utils.alert(_('Validation Error'), _('Invalid site name'), 'error');
 									return;
 								}
 								ui.hideModal();
@@ -172,12 +182,13 @@ return view.extend({
 								callSetSite(name, name, mode, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '1').then(function(result) {
 									ui.hideModal();
 									if (result && result.error) {
-										ui.addNotification(null, E('p', {}, result.error), 'error');
+										utils.alert(_('Error'), result.error, 'error');
 									} else {
+										var targetId = (result && result.id) ? result.id : name;
 										ui.showModal(_('Redirecting'), [E('p', {}, _('Site created, redirecting to edit page...'))]);
 										setTimeout(function() {
 											ui.hideModal();
-											location.href = L.url('admin/services/nginx-manager/sites/edit', name);
+											location.href = L.url('admin/services/nginx-manager/sites/edit', targetId);
 										}, 500);
 									}
 								});
@@ -204,7 +215,7 @@ return view.extend({
 		var table = E('table', { 'class': 'table nm-responsive-table' });
 		var thead = E('thead');
 		var headerRow = E('tr');
-		[_('Enabled'), _('Name'), _('Domain'), _('Type'), _('SSL'), _('Backend / Root'), _('Actions')].forEach(function(title) {
+		[_('Enabled'), _('Name'), _('Domain'), _('Port'), _('Type'), _('SSL'), _('Backend / Root'), _('Actions')].forEach(function(title) {
 			headerRow.appendChild(E('th', {}, title));
 		});
 		thead.appendChild(headerRow);
@@ -220,6 +231,13 @@ return view.extend({
 
 			row.appendChild(E('td', { 'data-label': _('Name') }, site.name || '-'));
 			row.appendChild(E('td', { 'data-label': _('Domain') }, renderDomainLink(site)));
+
+			var portDisplay = site.listen_port ? String(site.listen_port) : '80';
+			if (site.listen_addr) {
+				portDisplay = site.listen_addr + ':' + portDisplay;
+			}
+			row.appendChild(E('td', { 'data-label': _('Port') }, portDisplay));
+
 			row.appendChild(E('td', { 'data-label': _('Type') }, modeLabel(site.mode)));
 
 			var sslCell = E('td', { 'data-label': _('SSL') });
@@ -244,7 +262,17 @@ return view.extend({
 					ui.showModal(_('Clone Site'), [
 						E('p', {}, _('Clone this site with a new name? The clone will be disabled by default.')),
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('Cancel')),
 							E('button', {
 								'class': 'cbi-button cbi-button-apply',
 								'click': function() {
@@ -253,7 +281,7 @@ return view.extend({
 									callDuplicateSite(site.id).then(function(result) {
 										ui.hideModal();
 										if (result && result.error) {
-											ui.addNotification(null, E('p', {}, result.error), 'error');
+											utils.alert(_('Error'), result.error, 'error');
 										} else {
 											ui.showModal(_('Redirecting'), [E('p', {}, _('Site cloned, redirecting to edit page...'))]);
 											setTimeout(function() {
@@ -291,7 +319,7 @@ return view.extend({
 							'style': 'display:none;',
 							'click': function() {
 								if (!configFilePath) {
-									ui.addNotification(null, E('p', {}, _('Config file path not available')), 'error');
+									utils.alert(_('Error'), _('Config file path not available'), 'error');
 									return;
 								}
 								ui.showModal(_('Confirm Save'), [
@@ -299,19 +327,29 @@ return view.extend({
 									E('p', {}, _('A backup will be created before saving.')),
 									E('p', { 'style': 'margin-top:0.5em;' }, _('Direct edits are temporary and will be overwritten whenever managed configuration is applied. Use Custom Location Directives for persistent reverse-proxy changes.')),
 									E('div', { 'class': 'right' }, [
-										E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+										E('button', {
+											'type': 'button',
+											'class': 'btn',
+											'click': function(ev) {
+												if (ev) {
+													ev.preventDefault();
+													ev.stopPropagation();
+												}
+												ui.hideModal();
+											}
+										}, _('Cancel')),
 										E('button', {
 											'class': 'cbi-button cbi-button-apply',
 											'click': function() {
 												ui.hideModal();
 												callSaveFile(configFilePath, editor.textarea.value).then(function(r) {
 													if (r && r.error) {
-														ui.addNotification(null, E('p', {}, _('Save failed') + ': ' + r.error), 'error');
+														utils.alert(_('Save failed'), r.error, 'error');
 													} else {
 														ui.addNotification(null, E('p', {}, _('Config file saved successfully')), 'info');
 													}
 												}).catch(function(err) {
-													ui.addNotification(null, E('p', {}, _('Save failed') + ': ' + (err.message || err)), 'error');
+													utils.alert(_('Save failed'), (err.message || err), 'error');
 												});
 											}
 										}, _('Save'))
@@ -326,8 +364,15 @@ return view.extend({
 								editBtn,
 								saveBtn,
 								E('button', {
+									'type': 'button',
 									'class': 'btn',
-									'click': function() { ui.hideModal(); }
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
 								}, _('Close'))
 							])
 						]);
@@ -363,14 +408,24 @@ return view.extend({
 					ui.showModal(_('Confirm Delete'), [
 						E('p', {}, _('Are you sure you want to delete this site?')),
 						E('div', { 'class': 'right' }, [
-							E('button', { 'class': 'btn', 'click': function() { ui.hideModal(); } }, _('Cancel')),
+							E('button', {
+								'type': 'button',
+								'class': 'btn',
+								'click': function(ev) {
+									if (ev) {
+										ev.preventDefault();
+										ev.stopPropagation();
+									}
+									ui.hideModal();
+								}
+							}, _('Cancel')),
 							E('button', {
 								'class': 'cbi-button cbi-button-reset',
 								'click': function() {
 									ui.hideModal();
 									callDeleteSite(site.id).then(function(result) {
 										if (result && result.error) {
-											ui.addNotification(null, E('p', {}, result.error), 'error');
+											utils.alert(_('Error'), result.error, 'error');
 										} else {
 											ui.addNotification(null, E('p', {}, _('Site deleted successfully')), 'info');
 											setTimeout(function() { location.reload(); }, 500);

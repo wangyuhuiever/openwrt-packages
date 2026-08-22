@@ -639,6 +639,9 @@ msgstr "请稍候，ACME 证书签发可能需要一些时间..."
 msgid "Please wait, ACME renewal may take a while..."
 msgstr "请稍候，ACME 证书续期可能需要一些时间..."
 
+msgid "Port"
+msgstr "端口"
+
 msgid "Plugin Version"
 msgstr "插件版本"
 
@@ -1754,3 +1757,9 @@ msgstr "仅加入当前 Location；可使用 proxy_set_header、client_max_body_
 
 msgid "Disable a common header here before redefining that same header in Location Directives."
 msgstr "若要在 Location 指令中重新定义同名请求头，请先在此处关闭对应的常用请求头。"
+
+msgid "Preserve Port"
+msgstr "保留端口"
+
+msgid "Domain Only"
+msgstr "仅域名"
