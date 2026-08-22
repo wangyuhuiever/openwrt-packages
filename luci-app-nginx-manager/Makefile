@@ -141,6 +141,13 @@ NGINX_MGR_CONF
 
 	chmod 600 /etc/config/nginx_manager 2>/dev/null
 
+	mkdir -p /etc/crontabs
+	touch /etc/crontabs/root
+	if ! grep -Fq "/usr/sbin/nginx-manager-gen rotate-logs" /etc/crontabs/root; then
+		echo "0 * * * * /usr/sbin/nginx-manager-gen rotate-logs >/dev/null 2>&1" >> /etc/crontabs/root
+		/etc/init.d/cron reload 2>/dev/null || true
+	fi
+
 	rm -f /etc/uci-defaults/90-luci-app-nginx-manager
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
@@ -156,6 +163,10 @@ endef
 define Package/luci-app-nginx-manager/postrm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
+	if [ -f /etc/crontabs/root ]; then
+		sed -i '\#/usr/sbin/nginx-manager-gen rotate-logs#d' /etc/crontabs/root
+		/etc/init.d/cron reload 2>/dev/null || true
+	fi
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
 }
