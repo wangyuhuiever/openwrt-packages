@@ -1763,3 +1763,10 @@ msgstr "保留端口"
 
 msgid "Domain Only"
 msgstr "仅域名"
+
+msgid "Key Type / Length"
+msgstr "密钥类型 / 长度"
+
+msgid "Recommended"
+msgstr "推荐"
+

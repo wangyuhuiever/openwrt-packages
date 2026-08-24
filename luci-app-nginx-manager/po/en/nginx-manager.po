@@ -1763,3 +1763,10 @@ msgstr "Preserve Port"
 
 msgid "Domain Only"
 msgstr "Domain Only"
+
+msgid "Key Type / Length"
+msgstr "Key Type / Length"
+
+msgid "Recommended"
+msgstr "Recommended"
+

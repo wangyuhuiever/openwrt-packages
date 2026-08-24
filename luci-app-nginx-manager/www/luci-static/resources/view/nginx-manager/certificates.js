@@ -63,14 +63,14 @@ var callIssueSelfSigned = rpc.declare({
 var callAcmeIssue = rpc.declare({
 	object: 'nginx_manager',
 	method: 'acme_issue',
-	params: ['id', 'domain', 'account_email', 'validation_method', 'dns_api', 'credentials', 'dns_wait', 'auto_renew'],
+	params: ['id', 'domain', 'account_email', 'validation_method', 'dns_api', 'credentials', 'dns_wait', 'auto_renew', 'keylength'],
 	expect: {}
 });
 
 var callAcmeUpdate = rpc.declare({
 	object: 'nginx_manager',
 	method: 'acme_update',
-	params: ['id', 'domain', 'account_email', 'validation_method', 'dns_api', 'credentials', 'dns_wait', 'auto_renew'],
+	params: ['id', 'domain', 'account_email', 'validation_method', 'dns_api', 'credentials', 'dns_wait', 'auto_renew', 'keylength'],
 	expect: {}
 });
 
@@ -237,7 +237,7 @@ function showAcmeTaskModal(cert) {
 			: status;
 		statusNode.className = certStatusClass(displayStatus);
 		statusNode.textContent = certStatusLabel(displayStatus);
-		commandNode.textContent = (result && result.command) || '/usr/lib/acme/hook get';
+		commandNode.textContent = (result && result.command) || cert.acme_command || '-';
 
 		if (status === 'running') {
 			closeBtn.textContent = _('Run in Background');
@@ -618,16 +618,26 @@ function showEditCertModal(cert) {
 	var reissueNote = E('div', { 'class': 'cbi-value-description', 'style': 'display:none; color: #c44; font-weight: bold' },
 		_('Changing domain, validation method, or DNS provider requires re-issuing the certificate.'));
 
+	var keylengthSelect = E('select', { 'class': 'cbi-input-select' }, [
+		E('option', { 'value': 'ec-256' }, 'EC-256 (ECDSA P-256, ' + _('Recommended') + ')'),
+		E('option', { 'value': 'ec-384' }, 'EC-384 (ECDSA P-384)'),
+		E('option', { 'value': '2048' }, 'RSA 2048'),
+		E('option', { 'value': '4096' }, 'RSA 4096')
+	]);
+	keylengthSelect.value = cert.keylength || 'ec-256';
+
 	function checkReissueNeeded() {
 		var domainChanged = domainInput.value.trim() !== (cert.domain || '');
 		var methodChanged = methodSelect.value !== (cert.validation_method || 'webroot');
+		var keylengthChanged = keylengthSelect.value !== (cert.keylength || 'ec-256');
 		var newDnsApi = dnsApiSelect.value === '_custom' ? dnsApiCustomInput.value.trim() : dnsApiSelect.value;
 		var dnsApiChanged = methodSelect.value === 'dns' && newDnsApi !== (cert.dns_api || '');
-		reissueNote.style.display = (domainChanged || methodChanged || dnsApiChanged) ? '' : 'none';
+		reissueNote.style.display = (domainChanged || methodChanged || dnsApiChanged || keylengthChanged) ? '' : 'none';
 	}
 
 	domainInput.addEventListener('input', checkReissueNeeded);
 	methodSelect.addEventListener('change', checkReissueNeeded);
+	keylengthSelect.addEventListener('change', checkReissueNeeded);
 	dnsApiSelect.addEventListener('change', checkReissueNeeded);
 	dnsApiCustomInput.addEventListener('input', checkReissueNeeded);
 
@@ -646,6 +656,10 @@ function showEditCertModal(cert) {
 				accountEmailInput,
 				E('div', { 'class': 'cbi-value-description' }, _('A real email address is required for ACME account registration.'))
 			])
+		]),
+		E('div', { 'class': 'cbi-value' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Key Type / Length')),
+			E('div', { 'class': 'cbi-value-field' }, keylengthSelect)
 		]),
 		E('div', { 'class': 'cbi-value' }, [
 			E('label', { 'class': 'cbi-value-title' }, _('ACME Validation')),
@@ -693,6 +707,7 @@ function showEditCertModal(cert) {
 					var newDomain = domainInput.value.trim();
 					var newEmail = accountEmailInput.value.trim();
 					var newMethod = methodSelect.value;
+					var newKeylength = keylengthSelect.value;
 					var newDnsApi, newCredentials, newDnsWait;
 
 					if (newMethod === 'dns') {
@@ -733,7 +748,7 @@ function showEditCertModal(cert) {
 					ui.hideModal();
 					ui.showModal(_('Saving...'), [E('p', {}, _('Please wait...'))]);
 
-					callAcmeUpdate(cert.id, newDomain, newEmail, newMethod, newDnsApi, newCredentials, newDnsWait, autoRenewInput.checked ? '1' : '0').then(function(result) {
+					callAcmeUpdate(cert.id, newDomain, newEmail, newMethod, newDnsApi, newCredentials, newDnsWait, autoRenewInput.checked ? '1' : '0', newKeylength).then(function(result) {
 						ui.hideModal();
 						if (result && result.error) {
 							ui.addNotification(null, E('p', {}, _(result.error)), 'error');
@@ -1159,6 +1174,14 @@ function showAddCertModal(globalConfig) {
 	});
 	acmeAutoRenewInput.checked = true;
 
+	var acmeKeylengthSelect = E('select', { 'id': 'new-acme-keylength', 'class': 'cbi-input-select' }, [
+		E('option', { 'value': 'ec-256' }, 'EC-256 (ECDSA P-256, ' + _('Recommended') + ')'),
+		E('option', { 'value': 'ec-384' }, 'EC-384 (ECDSA P-384)'),
+		E('option', { 'value': '2048' }, 'RSA 2048'),
+		E('option', { 'value': '4096' }, 'RSA 4096')
+	]);
+	acmeKeylengthSelect.value = 'ec-256';
+
 	var acmeMethodSelect = E('select', { 'id': 'new-acme-method', 'class': 'cbi-input-select' }, [
 		E('option', { 'value': 'webroot' }, _('HTTP-01 Webroot')),
 		E('option', { 'value': 'dns' }, _('DNS-01')),
@@ -1358,6 +1381,7 @@ function showAddCertModal(globalConfig) {
 	function updateAcmeRows() {
 		var domainRow = document.getElementById('cert-domain-row');
 		var acmeEmailRow = document.getElementById('cert-acme-email-row');
+		var acmeKeylengthRow = document.getElementById('cert-acme-keylength-row');
 		var acmeAutoRenewRow = document.getElementById('cert-acme-auto-renew-row');
 		var acmeMethodRow = document.getElementById('cert-acme-method-row');
 		var isAcme = certTypeSelect.value === 'acme';
@@ -1366,6 +1390,7 @@ function showAddCertModal(globalConfig) {
 
 		if (domainRow) domainRow.style.display = (certTypeSelect.value === 'manual' || isScan) ? 'none' : '';
 		if (acmeEmailRow) acmeEmailRow.style.display = isAcme ? '' : 'none';
+		if (acmeKeylengthRow) acmeKeylengthRow.style.display = isAcme ? '' : 'none';
 		if (acmeAutoRenewRow) acmeAutoRenewRow.style.display = isAcme ? '' : 'none';
 		if (acmeMethodRow) acmeMethodRow.style.display = isAcme ? '' : 'none';
 		scanContainer.style.display = isScan ? '' : 'none';
@@ -1405,6 +1430,10 @@ function showAddCertModal(globalConfig) {
 				acmeAccountEmailInput,
 				E('div', { 'class': 'cbi-value-description' }, _('A real email address is required for ACME account registration.'))
 			])
+		]),
+		E('div', { 'class': 'cbi-value', 'id': 'cert-acme-keylength-row', 'style': 'display:none' }, [
+			E('label', { 'class': 'cbi-value-title' }, _('Key Type / Length')),
+			E('div', { 'class': 'cbi-value-field' }, acmeKeylengthSelect)
 		]),
 		E('div', { 'class': 'cbi-value', 'id': 'cert-acme-auto-renew-row', 'style': 'display:none' }, [
 			E('label', { 'class': 'cbi-value-title' }, _('Automatic Renewal')),
@@ -1576,7 +1605,7 @@ function showAddCertModal(globalConfig) {
 							}
 						}
 						ui.showModal(_('Requesting...'), [E('p', {}, _('Please wait, ACME certificate issuance may take a while...'))]);
-						callAcmeIssue(certName, certDomain, acmeAccountEmail, acmeMethod, dnsApi, dnsCredentials, dnsWait, acmeAutoRenew).then(function(result) {
+						callAcmeIssue(certName, certDomain, acmeAccountEmail, acmeMethod, dnsApi, dnsCredentials, dnsWait, acmeAutoRenew, acmeKeylengthSelect.value).then(function(result) {
 							if (result && result.error) {
 								ui.hideModal();
 								var errMsg = _(result.error);
