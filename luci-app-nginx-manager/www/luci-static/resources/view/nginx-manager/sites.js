@@ -215,7 +215,7 @@ return view.extend({
 		var table = E('table', { 'class': 'table nm-responsive-table' });
 		var thead = E('thead');
 		var headerRow = E('tr');
-		[_('Enabled'), _('Name'), _('Domain'), _('Port'), _('Type'), _('SSL'), _('Backend / Root'), _('Actions')].forEach(function(title) {
+		[_('Enabled'), _('Name'), _('Domain'), _('Port'), _('Type'), _('SSL'), _('Hosts'), _('Backend / Root'), _('Actions')].forEach(function(title) {
 			headerRow.appendChild(E('th', {}, title));
 		});
 		thead.appendChild(headerRow);
@@ -244,6 +244,18 @@ return view.extend({
 			sslCell.appendChild(E('span', { 'class': 'nm-badge ' + (site.has_ssl === '1' ? 'success' : 'disabled') },
 				site.has_ssl === '1' ? _('SSL') : '-'));
 			row.appendChild(sslCell);
+
+			var hostsCell = E('td', { 'data-label': _('Hosts') });
+			if (site.sync_hosts === '1') {
+				var badgeText = site.hosts_ip ? site.hosts_ip : _('Hosts');
+				hostsCell.appendChild(E('span', {
+					'class': 'nm-badge success',
+					'title': site.hosts_ip ? _('Mapped to %s in /etc/hosts').format(site.hosts_ip) : _('Synced to /etc/hosts')
+				}, badgeText));
+			} else {
+				hostsCell.appendChild(E('span', { 'class': 'nm-badge disabled' }, '-'));
+			}
+			row.appendChild(hostsCell);
 
 			row.appendChild(E('td', { 'data-label': _('Backend / Root') }, renderBackendLink(site)));
 

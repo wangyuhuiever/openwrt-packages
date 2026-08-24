@@ -1770,3 +1770,18 @@ msgstr "密钥类型 / 长度"
 msgid "Recommended"
 msgstr "推荐"
 
+msgid "Add to Local Hosts"
+msgstr "添加到内网 Hosts"
+
+msgid "Hosts Target IP"
+msgstr "Hosts 目标 IP"
+
+msgid "Automatically add/update domain mapping in /etc/hosts (defaults to router LAN IP)."
+msgstr "自动在 /etc/hosts 中添加/更新域名映射（留空默认使用路由器 LAN IP）。"
+
+msgid "Mapped to %s in /etc/hosts"
+msgstr "在 /etc/hosts 中映射到 %s"
+
+msgid "Synced to /etc/hosts"
+msgstr "已同步到 /etc/hosts"
+

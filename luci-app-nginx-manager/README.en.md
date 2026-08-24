@@ -283,6 +283,8 @@ www/luci-static/resources/
 | `proxy_connect_timeout` | string | — | Proxy connect timeout |
 | `proxy_read_timeout` | string | — | Proxy read timeout |
 | `proxy_send_timeout` | string | — | Proxy send timeout |
+| `sync_hosts` | boolean | 1 | Sync to local Hosts (write to /etc/hosts) |
+| `hosts_ip` | string | — | Target Hosts IP (defaults to router LAN IP) |
 
 ## CLI Tool
 
@@ -294,6 +296,7 @@ nginx-manager-gen apply                 # Generate + test + reload (rollback on 
 nginx-manager-gen render <section>      # Preview generated config for a site
 nginx-manager-gen test                  # Run nginx -t
 nginx-manager-gen backup                # Create a manual backup
+nginx-manager-gen sync-hosts            # Sync enabled site Hosts to /etc/hosts
 nginx-manager-gen --status              # Get nginx runtime status (JSON)
 nginx-manager-gen --check-env           # Check runtime environment dependencies (JSON)
 nginx-manager-gen --test-config         # Test config and record result (JSON)

@@ -283,6 +283,8 @@ www/luci-static/resources/
 | `proxy_connect_timeout` | string | — | 代理连接超时 |
 | `proxy_read_timeout` | string | — | 代理读取超时 |
 | `proxy_send_timeout` | string | — | 代理发送超时 |
+| `sync_hosts` | boolean | 1 | 同步到内网 Hosts（写入 /etc/hosts） |
+| `hosts_ip` | string | — | Hosts 目标 IP（默认使用路由器 LAN IP） |
 
 ## 命令行工具
 
@@ -294,6 +296,7 @@ nginx-manager-gen apply                 # 生成 + 测试 + 重载（失败回�
 nginx-manager-gen render <section>      # 预览指定站点的生成配置
 nginx-manager-gen test                  # 执行 nginx -t
 nginx-manager-gen backup                # 手动创建备份
+nginx-manager-gen sync-hosts            # 同步启用的站点 Hosts 到 /etc/hosts
 nginx-manager-gen --status              # 获取 nginx 运行状态（JSON）
 nginx-manager-gen --check-env           # 检查运行环境依赖（JSON）
 nginx-manager-gen --test-config         # 测试配置并记录结果（JSON）

@@ -13,6 +13,10 @@ MAX_BACKUPS=""
 LOCK_FILE="/tmp/nginx-manager-gen.lock"
 NGINX_CONF_PATH=""
 
+HOSTS_FILE="/etc/hosts"
+HOSTS_BEGIN_MARKER="# === BEGIN luci-app-nginx-manager ==="
+HOSTS_END_MARKER="# === END luci-app-nginx-manager ==="
+
 log_info() {
 	logger -t nginx-manager -p daemon.info "$1"
 }
@@ -44,6 +48,23 @@ validate_port() {
 
 validate_domain() {
 	echo "$1" | grep -qE '^[a-zA-Z0-9._-]+$'
+}
+
+validate_ip() {
+	local ip="$1"
+	[ -z "${ip}" ] && return 1
+	if echo "${ip}" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+		local o1 o2 o3 o4
+		o1="$(echo "${ip}" | cut -d. -f1)"
+		o2="$(echo "${ip}" | cut -d. -f2)"
+		o3="$(echo "${ip}" | cut -d. -f3)"
+		o4="$(echo "${ip}" | cut -d. -f4)"
+		[ "$o1" -le 255 ] && [ "$o2" -le 255 ] && [ "$o3" -le 255 ] && [ "$o4" -le 255 ] && return 0
+	fi
+	if echo "${ip}" | grep -qE '^[0-9a-fA-F:]+$' && echo "${ip}" | grep -q ':'; then
+		return 0
+	fi
+	return 1
 }
 
 is_acme_webroot_cert() {
@@ -1433,6 +1454,104 @@ generate_all() {
 	return 0
 }
 
+get_default_lan_ip() {
+	local ip=""
+	ip="$(uci -q get network.lan.ipaddr)" || ip=""
+	if [ -z "${ip}" ]; then
+		ip="$(ip -4 addr show dev br-lan 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}')"
+	fi
+	if [ -z "${ip}" ]; then
+		ip="$(ip -4 addr show dev eth0 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}')"
+	fi
+	[ -z "${ip}" ] && ip="127.0.0.1"
+	printf '%s' "${ip}"
+}
+
+_collect_site_hosts() {
+	local section="$1"
+	local enabled sync_hosts server_name hosts_ip
+	enabled="$(uci -q get "nginx_manager.${section}.enabled")" || enabled="1"
+	[ "${enabled}" = "0" ] && return 0
+
+	sync_hosts="$(uci -q get "nginx_manager.${section}.sync_hosts")" || sync_hosts="0"
+	[ "${sync_hosts}" != "1" ] && return 0
+
+	server_name="$(uci -q get "nginx_manager.${section}.server_name")" || return 0
+	[ -z "${server_name}" ] && return 0
+
+	hosts_ip="$(uci -q get "nginx_manager.${section}.hosts_ip")" || hosts_ip=""
+	[ -z "${hosts_ip}" ] && hosts_ip="${_DEFAULT_LAN_IP}"
+
+	if ! validate_ip "${hosts_ip}"; then
+		log_warn "Invalid hosts_ip '${hosts_ip}' for site ${section}"
+		return 0
+	fi
+
+	local domain
+	for domain in ${server_name}; do
+		case "${domain}" in
+			\**|*\**) continue ;;
+		esac
+		if validate_domain "${domain}"; then
+			printf '%s %s\n' "${hosts_ip}" "${domain}" >> "${_HOSTS_TMP_ENTRIES}"
+		fi
+	done
+}
+
+sync_hosts() {
+	local target_file="${HOSTS_FILE:-/etc/hosts}"
+	[ -f "${target_file}" ] || touch "${target_file}"
+
+	_HOSTS_TMP_ENTRIES="/tmp/nginx_manager_hosts.$$.tmp"
+	rm -f "${_HOSTS_TMP_ENTRIES}"
+	touch "${_HOSTS_TMP_ENTRIES}"
+
+	_DEFAULT_LAN_IP="$(get_default_lan_ip)"
+
+	. /lib/functions.sh
+	config_load nginx_manager
+	config_foreach _collect_site_hosts site
+
+	local tmp_hosts="/tmp/hosts.new.$$"
+	local has_entries=0
+	if [ -s "${_HOSTS_TMP_ENTRIES}" ]; then
+		sort -u "${_HOSTS_TMP_ENTRIES}" -o "${_HOSTS_TMP_ENTRIES}"
+		[ -s "${_HOSTS_TMP_ENTRIES}" ] && has_entries=1
+	fi
+
+	if grep -Fq "${HOSTS_BEGIN_MARKER}" "${target_file}" 2>/dev/null; then
+		awk -v begin="${HOSTS_BEGIN_MARKER}" -v end="${HOSTS_END_MARKER}" '
+			$0 == begin { skipping=1; next }
+			$0 == end   { skipping=0; next }
+			!skipping   { print }
+		' "${target_file}" > "${tmp_hosts}"
+	else
+		cp "${target_file}" "${tmp_hosts}"
+	fi
+
+	if [ "${has_entries}" -eq 1 ]; then
+		sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "${tmp_hosts}" 2>/dev/null || true
+		[ -s "${tmp_hosts}" ] && echo "" >> "${tmp_hosts}"
+		echo "${HOSTS_BEGIN_MARKER}" >> "${tmp_hosts}"
+		cat "${_HOSTS_TMP_ENTRIES}" >> "${tmp_hosts}"
+		echo "${HOSTS_END_MARKER}" >> "${tmp_hosts}"
+	else
+		sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "${tmp_hosts}" 2>/dev/null || true
+		[ -s "${tmp_hosts}" ] && echo "" >> "${tmp_hosts}"
+	fi
+
+	if ! cmp -s "${target_file}" "${tmp_hosts}"; then
+		cp "${tmp_hosts}" "${target_file}"
+		rm -f "${tmp_hosts}" "${_HOSTS_TMP_ENTRIES}"
+		log_info "Updated ${target_file}"
+		killall -HUP dnsmasq 2>/dev/null || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+		return 0
+	fi
+
+	rm -f "${tmp_hosts}" "${_HOSTS_TMP_ENTRIES}"
+	return 0
+}
+
 apply_config() {
 	load_global_config
 
@@ -1478,6 +1597,8 @@ apply_config() {
 		exec 9>&-
 		return 1
 	fi
+
+	sync_hosts
 
 	date '+%Y-%m-%d %H:%M:%S' > /tmp/nginx-manager-last-reload
 	log_info "Configuration applied and nginx reloaded"
@@ -1822,6 +1943,9 @@ case "$1" in
 	rotate-logs)
 		rotate_logs "$2" "$3"
 		;;
+	sync-hosts)
+		sync_hosts
+		;;
 	--status)
 		do_status
 		;;
@@ -1841,7 +1965,7 @@ case "$1" in
 		do_start
 		;;
 	*)
-		echo "Usage: $0 {generate|apply|render <section>|test|backup|rotate-logs|--status|--check-env|--test-config|--reload|--restart|--start}" >&2
+		echo "Usage: $0 {generate|apply|render <section>|test|backup|sync-hosts|rotate-logs|--status|--check-env|--test-config|--reload|--restart|--start}" >&2
 		exit 1
 		;;
 esac

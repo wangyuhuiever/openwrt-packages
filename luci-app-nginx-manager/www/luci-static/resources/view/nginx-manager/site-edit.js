@@ -3,6 +3,7 @@
 
 'require view';
 'require ui';
+'require uci';
 'require rpc';
 'require fs';
 'require nginx-manager/utils as utils';
@@ -21,7 +22,8 @@ var callSetSite = rpc.declare({
 		'websocket', 'proxy_type', 'grpc_path', 'grpc_pass', 'custom_proxy_headers', 'redirect_https', 'redirect_http_port', 'proxy_host', 'proxy_xff', 'proxy_xfp', 'proxy_xri',
 		'ssl_cert', 'ssl_protocols', 'ssl_ciphers', 'hsts_max_age',
 		'access_log', 'error_log', 'custom_server_block', 'redirect_target', 'enabled',
-		'proxy_connect_timeout', 'proxy_read_timeout', 'proxy_send_timeout', 'locations'],
+		'proxy_connect_timeout', 'proxy_read_timeout', 'proxy_send_timeout', 'locations',
+		'sync_hosts', 'hosts_ip'],
 	expect: {}
 });
 
@@ -53,7 +55,7 @@ return view.extend({
 			siteId = parts[parts.length - 1];
 		}
 
-		var promises = [callListCerts()];
+		var promises = [callListCerts(), uci.load('network').catch(function() { return null; })];
 
 		if (siteId) {
 			promises.push(callGetSite(siteId));
@@ -66,8 +68,9 @@ return view.extend({
 
 	render: function(data) {
 		var certs = (data[0] && data[0].certs) || [];
-		var site = data[1];
+		var site = data[2];
 		var isNew = !site || !!site.error;
+		var lanIp = (uci.get('network', 'lan', 'ipaddr') || '192.168.1.1');
 
 		var siteId = '';
 		if (L.env.pathinfo) {
@@ -154,6 +157,30 @@ return view.extend({
 		var serverNameInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'example.com' });
 		if (!isNew && site && site.server_name) serverNameInput.value = site.server_name;
 		basicSection.appendChild(makeField('opt-server_name', _('Domain'), serverNameInput));
+
+		/* Hosts Sync */
+		var syncHostsRow = makeFlag('opt-sync_hosts', _('Add to Local Hosts'),
+			isNew ? true : (site && site.sync_hosts === '1'));
+		var syncHostsCb = syncHostsRow.querySelector('input[type="checkbox"]');
+		basicSection.appendChild(syncHostsRow);
+
+		var hostsIpInput = E('input', {
+			'type': 'text',
+			'class': 'cbi-input-text',
+			'placeholder': lanIp
+		});
+		if (!isNew && site && site.hosts_ip) {
+			hostsIpInput.value = site.hosts_ip;
+		}
+		var hostsIpRow = makeField('opt-hosts_ip', _('Hosts Target IP'), hostsIpInput,
+			_('Automatically add/update domain mapping in /etc/hosts (defaults to router LAN IP).'));
+		basicSection.appendChild(hostsIpRow);
+
+		function updateHostsIpVisibility() {
+			hostsIpRow.style.display = syncHostsCb.checked ? '' : 'none';
+		}
+		syncHostsCb.addEventListener('change', updateHostsIpVisibility);
+		updateHostsIpVisibility();
 
 		/* Listen Address — optional IP to bind to */
 		var listenAddrInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': _('All interfaces') });
@@ -699,6 +726,8 @@ return view.extend({
 			data.custom_server_block = customBlockInput.value;
 			data.access_log          = document.getElementById('opt-access_log').checked ? '1' : '0';
 			data.error_log           = document.getElementById('opt-error_log').checked ? '1' : '0';
+			data.sync_hosts          = document.getElementById('opt-sync_hosts').checked ? '1' : '0';
+			data.hosts_ip            = document.getElementById('opt-hosts_ip').value.trim();
 
 			data.proxy_connect_timeout = (!isNew && site && site.proxy_connect_timeout) || '';
 			data.proxy_read_timeout    = (!isNew && site && site.proxy_read_timeout) || '';
@@ -777,7 +806,9 @@ return view.extend({
 				data.proxy_connect_timeout,
 				data.proxy_read_timeout,
 				data.proxy_send_timeout,
-				data.locations
+				data.locations,
+				data.sync_hosts,
+				data.hosts_ip
 			).then(function(result) {
 				if (result && result.error) {
 					showSaveError(result.detail || result.error);
