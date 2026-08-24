@@ -977,6 +977,172 @@ _add_upstream_server() {
 	printf '    server %s;\n' "$1"
 }
 
+_is_base_nginx_default_port() {
+	local port="$1"
+	detect_nginx_conf
+	[ -n "${NGINX_CONF_PATH}" ] && [ -f "${NGINX_CONF_PATH}" ] || return 1
+	if grep -E "listen[[:space:]]+([^;]*[[:space:]]+)?${port}([[:space:]]+[^;]*)?[[:space:]]+default_server" "${NGINX_CONF_PATH}" >/dev/null 2>&1; then
+		return 0
+	fi
+	if [ "${port}" = "80" ] && grep -E "listen[[:space:]]+([^;]*:)?[80]+([[:space:]]|;)" "${NGINX_CONF_PATH}" >/dev/null 2>&1; then
+		return 0
+	fi
+	return 1
+}
+
+_DEFAULT_SERVER_SSL_PORTS=""
+_DEFAULT_SERVER_HTTP_PORTS=""
+
+_collect_site_default_server_ports() {
+	local section="$1"
+	local enabled mode ssl_cert listen_port redirect_https redirect_http_port
+
+	config_get enabled "${section}" enabled "1"
+	[ "${enabled}" = "0" ] && return 0
+
+	config_get mode "${section}" mode "reverse_proxy"
+	if [ "${mode}" = "custom" ]; then
+		local custom_block
+		config_get custom_block "${section}" custom_server_block ""
+		if [ -n "${custom_block}" ]; then
+			local extracted_lines line port
+			extracted_lines="$(printf '%s\n' "${custom_block}" | grep -E '^[[:space:]]*listen[[:space:]]+')"
+			local old_ifs="${IFS}"
+			IFS='
+'
+			for line in ${extracted_lines}; do
+				[ -n "${line}" ] || continue
+				echo "${line}" | grep -q "default_server" && continue
+				port="$(echo "${line}" | sed -e 's/^[[:space:]]*listen[[:space:]]*//' -e 's/;.*//' | tr ' ' '\n' | grep -E '^[0-9]+$' | head -n1)"
+				[ -z "${port}" ] && port="$(echo "${line}" | grep -oE ':[0-9]+' | tr -d ':' | head -n1)"
+				[ -n "${port}" ] || continue
+				if echo "${line}" | grep -q "ssl"; then
+					case " ${_DEFAULT_SERVER_SSL_PORTS} " in
+						*" ${port} "*) ;;
+						*) _DEFAULT_SERVER_SSL_PORTS="${_DEFAULT_SERVER_SSL_PORTS} ${port}" ;;
+					esac
+				else
+					case " ${_DEFAULT_SERVER_HTTP_PORTS} " in
+						*" ${port} "*) ;;
+						*) _DEFAULT_SERVER_HTTP_PORTS="${_DEFAULT_SERVER_HTTP_PORTS} ${port}" ;;
+					esac
+				fi
+			done
+			IFS="${old_ifs}"
+		fi
+		return 0
+	fi
+
+	config_get ssl_cert "${section}" ssl_cert ""
+	config_get listen_port "${section}" listen_port ""
+
+	if [ -z "${listen_port}" ]; then
+		local listen_ports
+		config_get listen_ports "${section}" listen ""
+		if [ -n "${listen_ports}" ]; then
+			local lp port_num
+			for lp in ${listen_ports}; do
+				port_num="$(echo "${lp}" | grep -oE '[0-9]+' | head -n1)"
+				[ -n "${port_num}" ] || continue
+				if echo "${lp}" | grep -q "ssl" || [ -n "${ssl_cert}" ]; then
+					case " ${_DEFAULT_SERVER_SSL_PORTS} " in
+						*" ${port_num} "*) ;;
+						*) _DEFAULT_SERVER_SSL_PORTS="${_DEFAULT_SERVER_SSL_PORTS} ${port_num}" ;;
+					esac
+				else
+					case " ${_DEFAULT_SERVER_HTTP_PORTS} " in
+						*" ${port_num} "*) ;;
+						*) _DEFAULT_SERVER_HTTP_PORTS="${_DEFAULT_SERVER_HTTP_PORTS} ${port_num}" ;;
+					esac
+				fi
+			done
+			return 0
+		fi
+	fi
+
+	listen_port="${listen_port:-80}"
+
+	if [ -n "${ssl_cert}" ]; then
+		case " ${_DEFAULT_SERVER_SSL_PORTS} " in
+			*" ${listen_port} "*) ;;
+			*) _DEFAULT_SERVER_SSL_PORTS="${_DEFAULT_SERVER_SSL_PORTS} ${listen_port}" ;;
+		esac
+		config_get redirect_https "${section}" redirect_https "0"
+		config_get redirect_http_port "${section}" redirect_http_port ""
+		if [ "${redirect_https}" = "1" ] && [ -n "${redirect_http_port}" ]; then
+			case " ${_DEFAULT_SERVER_HTTP_PORTS} " in
+				*" ${redirect_http_port} "*) ;;
+				*) _DEFAULT_SERVER_HTTP_PORTS="${_DEFAULT_SERVER_HTTP_PORTS} ${redirect_http_port}" ;;
+			esac
+		fi
+	else
+		case " ${_DEFAULT_SERVER_HTTP_PORTS} " in
+			*" ${listen_port} "*) ;;
+			*) _DEFAULT_SERVER_HTTP_PORTS="${_DEFAULT_SERVER_HTTP_PORTS} ${listen_port}" ;;
+		esac
+	fi
+}
+
+generate_default_servers_conf() {
+	local output_file="${BUILD_DIR}/default-servers.conf"
+	_DEFAULT_SERVER_SSL_PORTS=""
+	_DEFAULT_SERVER_HTTP_PORTS=""
+
+	config_foreach _collect_site_default_server_ports site
+
+	local ssl_ports=""
+	local p
+	for p in ${_DEFAULT_SERVER_SSL_PORTS}; do
+		_is_base_nginx_default_port "${p}" && continue
+		case " ${ssl_ports} " in
+			*" ${p} "*) ;;
+			*) ssl_ports="${ssl_ports} ${p}" ;;
+		esac
+	done
+
+	local http_ports=""
+	for p in ${_DEFAULT_SERVER_HTTP_PORTS}; do
+		case " ${ssl_ports} " in
+			*" ${p} "*) continue ;;
+		esac
+		_is_base_nginx_default_port "${p}" && continue
+		case " ${http_ports} " in
+			*" ${p} "*) ;;
+			*) http_ports="${http_ports} ${p}" ;;
+		esac
+	done
+
+	[ -z "${ssl_ports}" ] && [ -z "${http_ports}" ] && return 0
+
+	{
+		generate_header
+		for p in ${ssl_ports}; do
+			cat <<EOF
+server {
+    listen ${p} ssl default_server;
+    listen [::]:${p} ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
+EOF
+		done
+
+		for p in ${http_ports}; do
+			cat <<EOF
+server {
+    listen ${p} default_server;
+    listen [::]:${p} default_server;
+    server_name _;
+    return 404;
+}
+
+EOF
+		done
+	} > "${output_file}"
+}
+
+
 # Comment out directives in OpenWrt's nginx UCI files that are also generated
 # into 00-global.conf, to prevent duplicate/conflicting directives when nginx
 # includes both files in the same http{} block.
@@ -1218,9 +1384,11 @@ sync_to_managed_dir() {
 	rm -f "${MANAGED_DIR}"/disabled/*.conf.disabled 2>/dev/null
 	rm -f "${MANAGED_DIR}"/00-global.conf 2>/dev/null
 	rm -f "${MANAGED_DIR}"/upstreams.conf 2>/dev/null
+	rm -f "${MANAGED_DIR}"/default-servers.conf 2>/dev/null
 
 	[ -f "${BUILD_DIR}/00-global.conf" ] && cp "${BUILD_DIR}/00-global.conf" "${MANAGED_DIR}/"
 	[ -f "${BUILD_DIR}/upstreams.conf" ] && cp "${BUILD_DIR}/upstreams.conf" "${MANAGED_DIR}/"
+	[ -f "${BUILD_DIR}/default-servers.conf" ] && cp "${BUILD_DIR}/default-servers.conf" "${MANAGED_DIR}/"
 
 	for f in "${BUILD_DIR}"/*.conf; do
 		[ -f "$f" ] || continue
@@ -1228,6 +1396,7 @@ sync_to_managed_dir() {
 		basename="$(basename "$f")"
 		[ "${basename}" = "00-global.conf" ] && continue
 		[ "${basename}" = "upstreams.conf" ] && continue
+		[ "${basename}" = "default-servers.conf" ] && continue
 		cp "$f" "${MANAGED_DIR}/sites/"
 	done
 
@@ -1254,6 +1423,7 @@ generate_all() {
 
 	generate_global_conf
 	generate_upstreams_conf
+	generate_default_servers_conf
 	config_foreach generate_site site
 
 	sync_to_managed_dir
