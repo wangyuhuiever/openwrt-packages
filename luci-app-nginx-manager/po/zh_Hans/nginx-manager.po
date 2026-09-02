@@ -1218,8 +1218,8 @@ msgstr "启用基于 QUIC 的 HTTP/3。为 listen 指令添加 quic reuseport �
 msgid "Security Headers"
 msgstr "安全响应头"
 
-msgid "Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy to SSL sites."
-msgstr "为 SSL 站点添加 X-Frame-Options、CSP、X-Content-Type-Options、Referrer-Policy、Permissions-Policy 安全响应头。"
+msgid "Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy to SSL sites."
+msgstr "为 SSL 站点添加 X-Frame-Options、CSP、X-Content-Type-Options、Referrer-Policy 安全响应头。"
 
 msgid "is managed by HSTS settings. Set HSTS Max Age to 0 to disable it."
 msgstr "已由 HSTS 设置管理。将 HSTS 最大有效期设为 0 可禁用。"

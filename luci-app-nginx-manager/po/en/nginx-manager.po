@@ -1119,8 +1119,8 @@ msgstr "Enable HTTP/3 over QUIC. Adds quic reuseport to listen directives and Al
 msgid "Security Headers"
 msgstr "Security Headers"
 
-msgid "Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy to SSL sites."
-msgstr "Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy to SSL sites."
+msgid "Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy to SSL sites."
+msgstr "Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy to SSL sites."
 
 msgid "is managed by HSTS settings. Set HSTS Max Age to 0 to disable it."
 msgstr "is managed by HSTS settings. Set HSTS Max Age to 0 to disable it."

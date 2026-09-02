@@ -88,8 +88,7 @@ return view.extend({
 			'X-Frame-Options': true,
 			'Content-Security-Policy': true,
 			'X-Content-Type-Options': true,
-			'Referrer-Policy': true,
-			'Permissions-Policy': true
+			'Referrer-Policy': true
 		};
 		var http3 = this.formValue(options.http3, '0');
 
@@ -324,7 +323,7 @@ return view.extend({
 		o.depends('http3', '1');
 
 		o = s2.option(form.Flag, 'security_headers', _('Security Headers'),
-			_('Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy to SSL sites.'));
+			_('Add X-Frame-Options, CSP, X-Content-Type-Options, Referrer-Policy to SSL sites.'));
 		o.rmempty = true;
 		o.default = '1';
 		this.customSslOptions.securityHeaders = o;

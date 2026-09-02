@@ -2027,7 +2027,7 @@ custom_ssl_directive_conflicts() {
 					printf 'Line %s: "add_header Alt-Svc" is managed by HTTP/3 settings. Disable HTTP/3 to customize it.\n' \
 						"${_CUSTOM_SSL_LINE_NO}"
 					;;
-				X-Frame-Options|Content-Security-Policy|X-Content-Type-Options|Referrer-Policy|Permissions-Policy)
+				X-Frame-Options|Content-Security-Policy|X-Content-Type-Options|Referrer-Policy)
 					if [ "${security_headers}" = "1" ]; then
 						printf 'Line %s: "add_header %s" is managed by Security Headers. Disable Security Headers to customize it.\n' \
 							"${_CUSTOM_SSL_LINE_NO}" "${header_name}"
