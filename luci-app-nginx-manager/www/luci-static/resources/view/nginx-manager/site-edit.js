@@ -23,7 +23,7 @@ var callSetSite = rpc.declare({
 		'ssl_cert', 'ssl_protocols', 'ssl_ciphers', 'hsts_max_age',
 		'access_log', 'error_log', 'custom_server_block', 'redirect_target', 'enabled',
 		'proxy_connect_timeout', 'proxy_read_timeout', 'proxy_send_timeout', 'locations',
-		'sync_hosts', 'hosts_ip'],
+		'sync_hosts', 'hosts_ip', 'custom_server_directives'],
 	expect: {}
 });
 
@@ -99,36 +99,33 @@ return view.extend({
 			var field = E('div', { 'class': 'cbi-value-field' });
 			inputEl.id = id;
 			field.appendChild(inputEl);
-			if (desc)
+			if (desc) {
 				field.appendChild(E('div', { 'class': 'cbi-value-description' }, desc));
+			}
 			row.appendChild(field);
 			return row;
 		}
 
-		function makeFlag(id, label, checked) {
-			var row = E('div', { 'class': 'cbi-value' });
-			row.appendChild(E('label', { 'class': 'cbi-value-title', 'for': id }, label));
-			var field = E('div', { 'class': 'cbi-value-field' });
-			var cb = E('input', { 'type': 'checkbox', 'id': id, 'class': 'cbi-input-checkbox' });
-			if (checked) cb.checked = true;
-			field.appendChild(cb);
-			row.appendChild(field);
-			return row;
+		function makeFlag(id, label, defaultChecked, desc) {
+			var cb = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+			cb.checked = !!defaultChecked;
+			return makeField(id, label, cb, desc);
 		}
 
-		/* ---- conditional sections ---- */
-		var sslSection, proxySection, staticSection, redirectSection, customSection;
+		/* ---- section elements (populated below) ---- */
+		var sslSection, proxySection, staticSection, redirectSection, customSection, serverDirectivesSection;
 
 		/* references for visibility updates */
 		var locationsContainer;
 
 		function updateVisibility() {
 			var mode = modeSelect.value;
-			sslSection.style.display      = (mode === 'reverse_proxy' || mode === 'static') ? '' : 'none';
-			proxySection.style.display    = mode === 'reverse_proxy' ? '' : 'none';
-			staticSection.style.display   = mode === 'static'        ? '' : 'none';
-			redirectSection.style.display = mode === 'redirect'      ? '' : 'none';
-			customSection.style.display   = mode === 'custom'        ? '' : 'none';
+			sslSection.style.display              = (mode === 'reverse_proxy' || mode === 'static') ? '' : 'none';
+			proxySection.style.display            = mode === 'reverse_proxy' ? '' : 'none';
+			staticSection.style.display           = mode === 'static'        ? '' : 'none';
+			redirectSection.style.display         = mode === 'redirect'      ? '' : 'none';
+			customSection.style.display           = mode === 'custom'        ? '' : 'none';
+			serverDirectivesSection.style.display = (mode === 'reverse_proxy' || mode === 'static') ? '' : 'none';
 		}
 
 		/* ========== Basic Settings ========== */
@@ -471,6 +468,31 @@ return view.extend({
 
 		page.appendChild(customSection);
 
+		/* ========== Custom Server Directives ========== */
+		serverDirectivesSection = E('div', { 'class': 'cbi-section' });
+		serverDirectivesSection.appendChild(E('h3', {}, _('Custom Server Directives')));
+
+		var customServerDirectivesInput = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'rows': 4,
+			'spellcheck': 'false',
+			'placeholder': 'large_client_header_buffers 4 32k;\nclient_header_buffer_size 8k;'
+		});
+		customServerDirectivesInput.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+		if (!isNew && site && site.custom_server_directives)
+			customServerDirectivesInput.value = site.custom_server_directives;
+
+		var serverDirectivesRow = E('div', { 'class': 'cbi-value' });
+		serverDirectivesRow.appendChild(E('label', { 'class': 'cbi-value-title' }, _('Server Block Directives')));
+		var serverDirectivesField = E('div', { 'class': 'cbi-value-field' });
+		serverDirectivesField.appendChild(customServerDirectivesInput);
+		serverDirectivesField.appendChild(E('div', { 'class': 'cbi-value-description' },
+			_('One directive per line. These will be added inside the server block (outside location blocks), e.g. large_client_header_buffers 4 32k;')));
+		serverDirectivesRow.appendChild(serverDirectivesField);
+		serverDirectivesSection.appendChild(serverDirectivesRow);
+
+		page.appendChild(serverDirectivesSection);
+
 		/* ========== Logging ========== */
 		var loggingSection = E('div', { 'class': 'cbi-section' });
 		loggingSection.appendChild(E('h3', {}, _('Logging')));
@@ -724,6 +746,7 @@ return view.extend({
 			data.index               = document.getElementById('opt-index').value.trim();
 			data.redirect_target     = document.getElementById('opt-redirect_target').value.trim();
 			data.custom_server_block = customBlockInput.value;
+			data.custom_server_directives = customServerDirectivesInput.value;
 			data.access_log          = document.getElementById('opt-access_log').checked ? '1' : '0';
 			data.error_log           = document.getElementById('opt-error_log').checked ? '1' : '0';
 			data.sync_hosts          = document.getElementById('opt-sync_hosts').checked ? '1' : '0';
@@ -808,7 +831,8 @@ return view.extend({
 				data.proxy_send_timeout,
 				data.locations,
 				data.sync_hosts,
-				data.hosts_ip
+				data.hosts_ip,
+				data.custom_server_directives
 			).then(function(result) {
 				if (result && result.error) {
 					showSaveError(result.detail || result.error);

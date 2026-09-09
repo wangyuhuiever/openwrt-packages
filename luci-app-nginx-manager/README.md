@@ -73,6 +73,10 @@
 通过可视化界面调整常用参数，无需手动编辑配置文件：
 
 - `client_max_body_size` — 请求体大小限制
+- `client_header_buffer_size` — 请求头缓冲区大小（如 `8k`）
+- `large_client_header_buffers` — 大型请求头缓冲区（如 `4 32k`，解决 400 Request Header Or Cookie Too Large 报错）
+- `client_body_buffer_size` — 请求体缓冲区大小（如 `128k`）
+- `custom_http_directives` — 全局自定义 HTTP 指令（直接注入 00-global.conf）
 - `keepalive_timeout` — 长连接超时
 - `gzip` — 压缩开关，启用时对齐 OpenWrt `uci.conf.template` 的 `gzip_vary on` 与 `gzip_proxied any`
 - `server_tokens` — 版本信息显示
@@ -231,6 +235,10 @@ www/luci-static/resources/
 | `dangerous_core_edit` | boolean | 0 | 危险编辑模式 |
 | `max_backups` | integer | 10 | 最大备份数量 |
 | `client_max_body_size` | string | — | 请求体大小限制 |
+| `client_header_buffer_size` | string | — | 请求头缓冲区大小（如 `8k`） |
+| `large_client_header_buffers` | string | — | 大型请求头缓冲区（如 `4 32k`） |
+| `client_body_buffer_size` | string | — | 请求体缓冲区大小（如 `128k`） |
+| `custom_http_directives` | string | — | 全局自定义 HTTP 指令（多行） |
 | `keepalive_timeout` | string | — | 长连接超时 |
 | `gzip` | boolean | 0 | 压缩开关 |
 | `server_tokens` | string | — | 版本信息显示 |
@@ -280,6 +288,7 @@ www/luci-static/resources/
 | `access_log` | boolean | 0 | 启用访问日志 |
 | `error_log` | boolean | 1 | 启用错误日志 |
 | `custom_server_block` | string | — | 自定义 server 块内容（自定义模式） |
+| `custom_server_directives` | string | — | 自定义 server 块指令（注入到 server 块内，location 外） |
 | `proxy_connect_timeout` | string | — | 代理连接超时 |
 | `proxy_read_timeout` | string | — | 代理读取超时 |
 | `proxy_send_timeout` | string | — | 代理发送超时 |

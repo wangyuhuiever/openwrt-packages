@@ -654,6 +654,13 @@ generate_reverse_proxy_site() {
 
 		generate_log_directives "${name}" "${access_log}" "${error_log}"
 
+		local custom_server_directives
+		custom_server_directives="$(uci -q get "nginx_manager.${section}.custom_server_directives")" || custom_server_directives=""
+		if [ -n "${custom_server_directives}" ]; then
+			echo ""
+			printf '%s\n' "${custom_server_directives}" | sed 's/^/    /'
+		fi
+
 		if is_acme_webroot_cert "${ssl_cert}"; then
 			echo ""
 			echo "    location /.well-known/acme-challenge/ {"
@@ -838,6 +845,13 @@ generate_static_site() {
 		echo "    index ${index};"
 
 		generate_log_directives "${name}" "${access_log}" "${error_log}"
+
+		local custom_server_directives
+		custom_server_directives="$(uci -q get "nginx_manager.${section}.custom_server_directives")" || custom_server_directives=""
+		if [ -n "${custom_server_directives}" ]; then
+			echo ""
+			printf '%s\n' "${custom_server_directives}" | sed 's/^/    /'
+		fi
 
 		if is_acme_webroot_cert "${ssl_cert}"; then
 			echo ""
@@ -1180,6 +1194,9 @@ _strip_directives_from_file() {
 	# Build the list of directives present in 00-global.conf
 	local directives=""
 	[ -n "${max_body}" ] && directives="${directives} client_max_body_size"
+	[ -n "${client_header_buffer_size}" ] && directives="${directives} client_header_buffer_size"
+	[ -n "${large_client_header_buffers}" ] && directives="${directives} large_client_header_buffers"
+	[ -n "${client_body_buffer_size}" ] && directives="${directives} client_body_buffer_size"
 	[ -n "${keepalive}" ] && directives="${directives} keepalive_timeout"
 	[ -n "${gzip}" ] && directives="${directives} gzip gzip_vary gzip_proxied gzip_types"
 	[ -n "${server_tokens}" ] && directives="${directives} server_tokens"
@@ -1261,8 +1278,14 @@ generate_global_conf() {
 	local ssl_session_timeout ssl_session_cache ssl_buffer_size
 	local ssl_stapling_managed
 	local http2 http3 http3_stream_buffer_size
+	local client_header_buffer_size large_client_header_buffers client_body_buffer_size
+	local custom_http_directives
 
 	max_body="$(uci -q get nginx_manager.global.client_max_body_size)" || max_body=""
+	client_header_buffer_size="$(uci -q get nginx_manager.global.client_header_buffer_size)" || client_header_buffer_size=""
+	large_client_header_buffers="$(uci -q get nginx_manager.global.large_client_header_buffers)" || large_client_header_buffers=""
+	client_body_buffer_size="$(uci -q get nginx_manager.global.client_body_buffer_size)" || client_body_buffer_size=""
+	custom_http_directives="$(uci -q get nginx_manager.global.custom_http_directives)" || custom_http_directives=""
 	keepalive="$(uci -q get nginx_manager.global.keepalive_timeout)" || keepalive=""
 	gzip="$(uci -q get nginx_manager.global.gzip)" || gzip=""
 	server_tokens="$(uci -q get nginx_manager.global.server_tokens)" || server_tokens=""
@@ -1293,7 +1316,9 @@ generate_global_conf() {
 	local _http3_stream_buffer_size_set="${http3_stream_buffer_size}"
 	[ -z "${http3_stream_buffer_size}" ] && http3_stream_buffer_size="256k"
 
-	[ -z "${max_body}" ] && [ -z "${keepalive}" ] && [ -z "${gzip}" ] && \
+	[ -z "${max_body}" ] && [ -z "${client_header_buffer_size}" ] && [ -z "${large_client_header_buffers}" ] && \
+	[ -z "${client_body_buffer_size}" ] && [ -z "${custom_http_directives}" ] && \
+	[ -z "${keepalive}" ] && [ -z "${gzip}" ] && \
 	[ -z "${server_tokens}" ] && [ -z "${sendfile}" ] && \
 	[ -z "${tcp_nopush}" ] && [ -z "${tcp_nodelay}" ] && \
 	[ -z "${access_log}" ] && [ -z "${error_log}" ] && \
@@ -1309,6 +1334,9 @@ generate_global_conf() {
 		generate_header
 
 		[ -n "${max_body}" ] && echo "client_max_body_size ${max_body};"
+		[ -n "${client_header_buffer_size}" ] && echo "client_header_buffer_size ${client_header_buffer_size};"
+		[ -n "${large_client_header_buffers}" ] && echo "large_client_header_buffers ${large_client_header_buffers};"
+		[ -n "${client_body_buffer_size}" ] && echo "client_body_buffer_size ${client_body_buffer_size};"
 		[ -n "${keepalive}" ] && echo "keepalive_timeout ${keepalive};"
 
 		if [ "${gzip}" = "1" ]; then
@@ -1368,6 +1396,11 @@ generate_global_conf() {
 		# HTTP/3 stream buffer size (http level)
 		if [ "${http3}" = "1" ] && _nginx_has_v3; then
 			echo "http3_stream_buffer_size ${http3_stream_buffer_size};"
+		fi
+
+		if [ -n "${custom_http_directives}" ]; then
+			echo ""
+			printf '%s\n' "${custom_http_directives}"
 		fi
 	} > "${output_file}"
 

@@ -16,6 +16,10 @@ validate_nginx_manager_global() {
         'max_backups:uint:5' \
 
         'client_max_body_size:string:' \
+        'client_header_buffer_size:string:' \
+        'large_client_header_buffers:string:' \
+        'client_body_buffer_size:string:' \
+        'custom_http_directives:string:' \
         'keepalive_timeout:string:' \
         'gzip:bool:0' \
         'server_tokens:string:' \
@@ -66,6 +70,7 @@ validate_nginx_manager_site() {
         'access_log:bool:1' \
         'error_log:bool:1' \
         'custom_server_block:string' \
+        'custom_server_directives:string' \
         'redirect_target:string' \
         'proxy_connect_timeout:string' \
         'proxy_read_timeout:string' \

@@ -214,6 +214,21 @@ return view.extend({
 		o.placeholder = '1m';
 		o.rmempty = true;
 
+		o = s1.option(form.Value, 'client_header_buffer_size', _('Client Header Buffer Size'),
+			_('Buffer size for reading client request header, e.g. 1k, 4k, 8k. Leave empty for default.'));
+		o.placeholder = '1k';
+		o.rmempty = true;
+
+		o = s1.option(form.Value, 'large_client_header_buffers', _('Large Client Header Buffers'),
+			_('Maximum number and size of buffers for large client request headers, e.g. 4 8k, 4 32k. Increase this if you encounter "400 Request Header Or Cookie Too Large" errors.'));
+		o.placeholder = '4 8k';
+		o.rmempty = true;
+
+		o = s1.option(form.Value, 'client_body_buffer_size', _('Client Body Buffer Size'),
+			_('Buffer size for reading client request body, e.g. 128k. Leave empty for default.'));
+		o.placeholder = '128k';
+		o.rmempty = true;
+
 		o = s1.option(form.Value, 'keepalive_timeout', _('Keepalive Timeout'));
 		o.placeholder = '65';
 		o.datatype = 'uinteger';
@@ -247,6 +262,12 @@ return view.extend({
 		o = s1.option(form.Value, 'error_log', _('Error Log'));
 		o.placeholder = '/var/log/nginx/error.log';
 		o.rmempty = true;
+
+		o = s1.option(form.TextValue, 'custom_http_directives', _('Custom HTTP Directives'),
+			_('One directive per line. These will be added inside the global http block (00-global.conf).'));
+		o.rmempty = true;
+		o.rows = 4;
+		o.placeholder = 'client_header_timeout 60s;\nproxy_buffer_size 16k;';
 
 		/* ========== System Behavior ========== */
 		var s3 = m.section(form.TypedSection, 'global', _('System Behavior'));

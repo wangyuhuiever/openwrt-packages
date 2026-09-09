@@ -1634,3 +1634,36 @@ msgstr ""
 
 msgid "log file(s)"
 msgstr ""
+
+msgid "Client Header Buffer Size"
+msgstr ""
+
+msgid "Buffer size for reading client request header, e.g. 1k, 4k, 8k. Leave empty for default."
+msgstr ""
+
+msgid "Large Client Header Buffers"
+msgstr ""
+
+msgid "Maximum number and size of buffers for large client request headers, e.g. 4 8k, 4 32k. Increase this if you encounter \"400 Request Header Or Cookie Too Large\" errors."
+msgstr ""
+
+msgid "Client Body Buffer Size"
+msgstr ""
+
+msgid "Buffer size for reading client request body, e.g. 128k. Leave empty for default."
+msgstr ""
+
+msgid "Custom HTTP Directives"
+msgstr ""
+
+msgid "One directive per line. These will be added inside the global http block (00-global.conf)."
+msgstr ""
+
+msgid "Custom Server Directives"
+msgstr ""
+
+msgid "Server Block Directives"
+msgstr ""
+
+msgid "One directive per line. These will be added inside the server block (outside location blocks), e.g. large_client_header_buffers 4 32k;"
+msgstr ""

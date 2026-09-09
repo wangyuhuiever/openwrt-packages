@@ -1785,3 +1785,36 @@ msgstr "在 /etc/hosts 中映射到 %s"
 msgid "Synced to /etc/hosts"
 msgstr "已同步到 /etc/hosts"
 
+msgid "Client Header Buffer Size"
+msgstr "客户端请求头缓冲区大小"
+
+msgid "Buffer size for reading client request header, e.g. 1k, 4k, 8k. Leave empty for default."
+msgstr "读取客户端请求头的缓冲区大小，如 1k、4k、8k。留空使用默认值。"
+
+msgid "Large Client Header Buffers"
+msgstr "大型请求头缓冲区"
+
+msgid "Maximum number and size of buffers for large client request headers, e.g. 4 8k, 4 32k. Increase this if you encounter \"400 Request Header Or Cookie Too Large\" errors."
+msgstr "用于读取大型客户端请求头的缓冲区数量与大小，如 4 8k、4 32k。如遇到 \"400 Request Header Or Cookie Too Large\" 报错可调大此项。"
+
+msgid "Client Body Buffer Size"
+msgstr "客户端请求体缓冲区大小"
+
+msgid "Buffer size for reading client request body, e.g. 128k. Leave empty for default."
+msgstr "读取客户端请求体的缓冲区大小，如 128k。留空使用默认值。"
+
+msgid "Custom HTTP Directives"
+msgstr "自定义 HTTP 指令"
+
+msgid "One directive per line. These will be added inside the global http block (00-global.conf)."
+msgstr "每行一条指令。将直接注入到全局 http 块中（00-global.conf）。"
+
+msgid "Custom Server Directives"
+msgstr "自定义 Server 指令"
+
+msgid "Server Block Directives"
+msgstr "Server 块指令"
+
+msgid "One directive per line. These will be added inside the server block (outside location blocks), e.g. large_client_header_buffers 4 32k;"
+msgstr "每行一条指令。将直接注入到 server 块内（location 块之外），例如 large_client_header_buffers 4 32k;"
+

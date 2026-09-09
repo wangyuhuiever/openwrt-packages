@@ -73,6 +73,10 @@ Modify UCI config → Generate nginx conf → nginx -t test → Reload on pass �
 Adjust common parameters through a visual editor — no manual file editing needed:
 
 - `client_max_body_size` — Request body size limit
+- `client_header_buffer_size` — Request header buffer size (e.g. `8k`)
+- `large_client_header_buffers` — Large client header buffers (e.g. `4 32k`, resolves `400 Request Header Or Cookie Too Large` error)
+- `client_body_buffer_size` — Request body buffer size (e.g. `128k`)
+- `custom_http_directives` — Global custom HTTP directives (injected directly into `00-global.conf`)
 - `keepalive_timeout` — Keep-alive timeout
 - `gzip` — Compression toggle; when enabled, aligns with OpenWrt `uci.conf.template` by emitting `gzip_vary on` and `gzip_proxied any`
 - `server_tokens` — Version info visibility
@@ -231,6 +235,10 @@ www/luci-static/resources/
 | `dangerous_core_edit` | boolean | 0 | Dangerous edit mode |
 | `max_backups` | integer | 10 | Maximum backup count |
 | `client_max_body_size` | string | — | Request body size limit |
+| `client_header_buffer_size` | string | — | Request header buffer size (e.g. `8k`) |
+| `large_client_header_buffers` | string | — | Large client header buffers (e.g. `4 32k`) |
+| `client_body_buffer_size` | string | — | Request body buffer size (e.g. `128k`) |
+| `custom_http_directives` | string | — | Global custom HTTP directives (multi-line) |
 | `keepalive_timeout` | string | — | Keep-alive timeout |
 | `gzip` | boolean | 0 | Compression toggle |
 | `server_tokens` | string | — | Version info visibility |
@@ -280,6 +288,7 @@ www/luci-static/resources/
 | `access_log` | boolean | 0 | Enable access log |
 | `error_log` | boolean | 1 | Enable error log |
 | `custom_server_block` | string | — | Custom server block content (custom mode) |
+| `custom_server_directives` | string | — | Custom server block directives (injected inside server block, outside location) |
 | `proxy_connect_timeout` | string | — | Proxy connect timeout |
 | `proxy_read_timeout` | string | — | Proxy read timeout |
 | `proxy_send_timeout` | string | — | Proxy send timeout |
