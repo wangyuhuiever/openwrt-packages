@@ -1379,8 +1379,24 @@ handle_issue_self_signed() {
 
 	[ -z "${cert_name}" ] && { json_init; json_add_string "error" "missing id"; json_dump; return; }
 	validate_name "${cert_name}" || { json_init; json_add_string "error" "invalid id"; json_dump; return; }
-	resolve_new_cert_id "${cert_name}" || { json_init; json_add_string "error" "${_RESOLVE_CERT_ID_ERROR}"; json_dump; return; }
-	cert_id="${_RESOLVED_CERT_ID}"
+
+	local existing_type existing_cert_type
+	existing_type="$(uci -q get "nginx_manager.${cert_name}")" || existing_type=""
+	if [ "${existing_type}" = "cert" ]; then
+		existing_cert_type="$(uci -q get "nginx_manager.${cert_name}.type")" || existing_cert_type=""
+		if [ "${existing_cert_type}" = "self_signed" ]; then
+			cert_id="${cert_name}"
+		else
+			json_init
+			json_add_string "error" "certificate name conflicts with an existing non-self-signed certificate"
+			json_dump
+			return
+		fi
+	else
+		resolve_new_cert_id "${cert_name}" || { json_init; json_add_string "error" "${_RESOLVE_CERT_ID_ERROR}"; json_dump; return; }
+		cert_id="${_RESOLVED_CERT_ID}"
+	fi
+
 	[ -z "${domain}" ] && { json_init; json_add_string "error" "missing domain"; json_dump; return; }
 
 	load_global_config
@@ -1389,12 +1405,83 @@ handle_issue_self_signed() {
 	mkdir -p "${cert_subdir}"
 	chmod 700 "${cert_subdir}"
 
-	openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-		-keyout "${cert_subdir}/privkey.pem" \
-		-out "${cert_subdir}/fullchain.pem" \
-		-subj "/CN=${domain}" 2>/dev/null
+	local san_list="" primary_cn="" clean_domains="" d="" entry="" base_domain=""
+	clean_domains="$(echo "${domain}" | tr ',' ' ')"
+	for d in ${clean_domains}; do
+		[ -z "${d}" ] && continue
+		echo "${d}" | grep -qE '^[a-zA-Z0-9.*:_-]+$' || {
+			json_init
+			json_add_string "error" "invalid domain: ${d}"
+			json_dump
+			return
+		}
 
-	[ $? -ne 0 ] && { json_init; json_add_string "error" "openssl failed"; json_dump; return; }
+		[ -z "${primary_cn}" ] && primary_cn="${d}"
+
+		if echo "${d}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || echo "${d}" | grep -q ':'; then
+			entry="IP:${d}"
+			case ",${san_list}," in
+				*",${entry},"*) ;;
+				*) san_list="${san_list:+${san_list},}${entry}" ;;
+			esac
+		else
+			entry="DNS:${d}"
+			case ",${san_list}," in
+				*",${entry},"*) ;;
+				*) san_list="${san_list:+${san_list},}${entry}" ;;
+			esac
+			case "${d}" in
+				\*.*)
+					base_domain="${d#\*.}"
+					if [ -n "${base_domain}" ]; then
+						case ",${san_list}," in
+							*",DNS:${base_domain},"*) ;;
+							*) san_list="${san_list:+${san_list},}DNS:${base_domain}" ;;
+						esac
+					fi
+					;;
+			esac
+		fi
+	done
+
+	[ -z "${primary_cn}" ] && { json_init; json_add_string "error" "missing domain"; json_dump; return; }
+
+	if [ ${#primary_cn} -gt 64 ]; then
+		primary_cn="$(echo "${primary_cn}" | cut -c1-64)"
+	fi
+
+	local openssl_err=""
+	if [ -n "${san_list}" ]; then
+		openssl_err="$(openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+			-keyout "${cert_subdir}/privkey.pem" \
+			-out "${cert_subdir}/fullchain.pem" \
+			-subj "/CN=${primary_cn}" \
+			-addext "subjectAltName=${san_list}" \
+			-addext "extendedKeyUsage=serverAuth" \
+			-addext "keyUsage=digitalSignature,keyEncipherment" 2>&1)" || \
+		openssl_err="$(openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+			-keyout "${cert_subdir}/privkey.pem" \
+			-out "${cert_subdir}/fullchain.pem" \
+			-subj "/CN=${primary_cn}" \
+			-addext "subjectAltName=${san_list}" 2>&1)" || \
+		openssl_err="$(openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+			-keyout "${cert_subdir}/privkey.pem" \
+			-out "${cert_subdir}/fullchain.pem" \
+			-subj "/CN=${primary_cn}" 2>&1)"
+	else
+		openssl_err="$(openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+			-keyout "${cert_subdir}/privkey.pem" \
+			-out "${cert_subdir}/fullchain.pem" \
+			-subj "/CN=${primary_cn}" 2>&1)"
+	fi
+
+	[ $? -ne 0 ] && {
+		json_init
+		json_add_string "error" "openssl failed"
+		json_add_string "detail" "${openssl_err}"
+		json_dump
+		return
+	}
 
 	chmod 600 "${cert_subdir}/privkey.pem"
 
@@ -1406,6 +1493,8 @@ handle_issue_self_signed() {
 	uci set "nginx_manager.${cert_id}.domain=${domain}"
 	uci set "nginx_manager.${cert_id}.auto_renew=0"
 	uci commit nginx_manager
+
+	/etc/init.d/nginx reload >/dev/null 2>&1
 
 	json_init
 	json_add_string "result" "ok"

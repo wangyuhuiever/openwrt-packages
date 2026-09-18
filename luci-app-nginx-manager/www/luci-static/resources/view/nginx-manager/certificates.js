@@ -1158,6 +1158,7 @@ function showAddCertModal(globalConfig) {
 	]);
 
 	var certDomainInput = E('input', { 'type': 'text', 'id': 'new-cert-domain', 'class': 'cbi-input-text' });
+	var certDomainDesc = E('div', { 'class': 'cbi-value-description', 'id': 'new-cert-domain-desc' });
 
 	var acmeAccountEmailInput = E('input', {
 		'type': 'email',
@@ -1403,6 +1404,12 @@ function showAddCertModal(globalConfig) {
 		for (var i = 0; i < dnsBasicRows.length; i++)
 			dnsBasicRows[i].style.display = isDns ? '' : 'none';
 
+		if (certDomainDesc) {
+			certDomainDesc.textContent = (certTypeSelect.value === 'self_signed')
+				? _('Supports domain names (e.g. example.com, *.example.com) or IP addresses (e.g. 192.168.1.1), separated by commas or spaces.')
+				: _('Domain name to request certificate for, e.g. example.com or *.example.com.');
+		}
+
 		updateDnsCredsFields();
 	}
 
@@ -1422,7 +1429,7 @@ function showAddCertModal(globalConfig) {
 		scanContainer,
 		E('div', { 'class': 'cbi-value', 'id': 'cert-domain-row' }, [
 			E('label', { 'class': 'cbi-value-title' }, _('Domain')),
-			E('div', { 'class': 'cbi-value-field' }, certDomainInput)
+			E('div', { 'class': 'cbi-value-field' }, [certDomainInput, certDomainDesc])
 		]),
 		E('div', { 'class': 'cbi-value', 'id': 'cert-acme-email-row', 'style': 'display:none' }, [
 			E('label', { 'class': 'cbi-value-title' }, _('ACME Account Email')),
@@ -1765,6 +1772,66 @@ return view.extend({
 					'class': 'cbi-button cbi-button-apply',
 					'click': function() { requestAcmeRenew(cert); }
 				}, '\u21BB ' + (cert.status === 'acme_failed' || cert.status === 'missing' ? _('Regenerate') : _('Renew'))));
+			}
+
+			if (cert.type === 'self_signed') {
+				actionsCell.appendChild(E('button', {
+					'class': 'cbi-button cbi-button-apply',
+					'click': function() {
+						var regenDomainInput = E('input', {
+							'type': 'text',
+							'class': 'cbi-input-text',
+							'value': cert.domain || ''
+						});
+						ui.showModal(_('Regenerate Certificate'), [
+							E('p', {}, _('Are you sure you want to regenerate this self-signed certificate?')),
+							E('div', { 'class': 'cbi-value' }, [
+								E('label', { 'class': 'cbi-value-title' }, _('Domain')),
+								E('div', { 'class': 'cbi-value-field' }, [
+									regenDomainInput,
+									E('div', { 'class': 'cbi-value-description' }, _('Supports domain names (e.g. example.com, *.example.com) or IP addresses (e.g. 192.168.1.1), separated by commas or spaces.'))
+								])
+							]),
+							E('div', { 'class': 'right' }, [
+								E('button', {
+									'type': 'button',
+									'class': 'btn',
+									'click': function(ev) {
+										if (ev) {
+											ev.preventDefault();
+											ev.stopPropagation();
+										}
+										ui.hideModal();
+									}
+								}, _('Cancel')),
+								E('button', {
+									'class': 'cbi-button cbi-button-apply',
+									'click': function() {
+										var newDomain = regenDomainInput.value.trim();
+										if (!newDomain) {
+											utils.alert(_('Validation Error'), _('Domain is required for self-signed certificates'), 'error');
+											return;
+										}
+										ui.hideModal();
+										ui.showModal(_('Generating...'), [E('p', {}, _('Please wait...'))]);
+										callIssueSelfSigned(cert.id, cert.name || cert.id, newDomain).then(function(result) {
+											ui.hideModal();
+											if (result && result.error) {
+												utils.alert(_('Error'), result.error, 'error');
+											} else {
+												ui.addNotification(null, E('p', {}, _('Self-signed certificate generated')), 'info');
+												setTimeout(function() { location.reload(); }, 500);
+											}
+										}).catch(function(err) {
+											ui.hideModal();
+											utils.alert(_('Error'), _('Failed to generate self-signed certificate') + ': ' + err, 'error');
+										});
+									}
+								}, _('Regenerate'))
+							])
+						]);
+					}
+				}, '\u21BB ' + _('Regenerate')));
 			}
 
 			actionsCell.appendChild(E('button', {

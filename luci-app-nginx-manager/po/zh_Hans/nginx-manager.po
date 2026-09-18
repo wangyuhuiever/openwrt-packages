@@ -1818,3 +1818,14 @@ msgstr "Server 块指令"
 msgid "One directive per line. These will be added inside the server block (outside location blocks), e.g. large_client_header_buffers 4 32k;"
 msgstr "每行一条指令。将直接注入到 server 块内（location 块之外），例如 large_client_header_buffers 4 32k;"
 
+msgid "Regenerate Certificate"
+msgstr "重新生成证书"
+
+msgid "Are you sure you want to regenerate this self-signed certificate?"
+msgstr "您确定要重新生成此自签名证书吗？"
+
+msgid "Supports domain names (e.g. example.com, *.example.com) or IP addresses (e.g. 192.168.1.1), separated by commas or spaces."
+msgstr "支持域名（如 example.com、*.example.com）或 IP 地址（如 192.168.1.1），多个以逗号或空格分隔。"
+
+msgid "Domain name to request certificate for, e.g. example.com or *.example.com."
+msgstr "申请证书的域名，如 example.com 或 *.example.com。"

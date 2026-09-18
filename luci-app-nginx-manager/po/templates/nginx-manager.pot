@@ -1667,3 +1667,15 @@ msgstr ""
 
 msgid "One directive per line. These will be added inside the server block (outside location blocks), e.g. large_client_header_buffers 4 32k;"
 msgstr ""
+
+msgid "Regenerate Certificate"
+msgstr ""
+
+msgid "Are you sure you want to regenerate this self-signed certificate?"
+msgstr ""
+
+msgid "Supports domain names (e.g. example.com, *.example.com) or IP addresses (e.g. 192.168.1.1), separated by commas or spaces."
+msgstr ""
+
+msgid "Domain name to request certificate for, e.g. example.com or *.example.com."
+msgstr ""
