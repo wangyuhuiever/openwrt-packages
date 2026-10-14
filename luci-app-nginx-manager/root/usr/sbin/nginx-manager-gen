@@ -260,13 +260,47 @@ restore_latest_backup() {
 	return 0
 }
 
+prepare_uci_config() {
+	# nginx-util writes /var/lib/nginx/uci.conf, not /etc/nginx/uci.conf.
+	# The latter must remain a symlink for template changes to take effect.
+	[ -x /usr/bin/nginx-util ] && [ -f /etc/nginx/uci.conf.template ] || return 0
+	local enabled
+	enabled="$(uci -q get nginx.global.uci_enable)" || enabled=""
+	case "${enabled}" in
+		1|on|true|yes|enabled) ;;
+		*) return 0 ;;
+	esac
+
+	/usr/bin/nginx-util init_lan || return 1
+	local conf="/etc/nginx/uci.conf" target="/var/lib/nginx/uci.conf"
+	[ -f "${target}" ] || return 1
+
+	if [ -L "${conf}" ]; then
+		return 0
+	fi
+	if [ -e "${conf}" ]; then
+		# Older nginx-manager versions replaced this symlink with a regular
+		# generated file. Do not replace a user's independently written config.
+		[ "$(head -n 1 "${conf}")" = '# This file is re-created when Nginx starts.' ] || return 0
+		local backup="${conf}.before-link-repair"
+		[ -e "${backup}" ] || cp -p "${conf}" "${backup}" || return 1
+	fi
+
+	local link="${conf}.link.$$"
+	ln -s "${target}" "${link}" || return 1
+	mv -f "${link}" "${conf}" || { rm -f "${link}"; return 1; }
+}
+
 test_nginx_config() {
+	prepare_uci_config || return 1
 	detect_nginx_conf
 	nginx -t -c "${NGINX_CONF_PATH}" 2>&1
 	return $?
 }
 
 reload_nginx() {
+	# This also repairs legacy links when test_before_reload is disabled.
+	prepare_uci_config || return 1
 	/etc/init.d/nginx reload 2>&1
 	return $?
 }
@@ -1188,8 +1222,12 @@ EOF
 _strip_directives_from_file() {
 	local conf_file="$1"
 	[ -f "${conf_file}" ] || return 0
+	# Rename the target, never the symlink used by the nginx init script.
+	conf_file="$(readlink -f "${conf_file}")" || return 1
 
-	local tmp="${conf_file}.tmp"
+	local tmp
+	tmp="$(mktemp "${conf_file}.XXXXXX")" || return 1
+	cp -p "${conf_file}" "${tmp}" || { rm -f "${tmp}"; return 1; }
 
 	# Build the list of directives present in 00-global.conf
 	local directives=""
@@ -1251,11 +1289,14 @@ _strip_template_directives() {
 _restore_directives_in_file() {
 	local conf_file="$1"
 	[ -f "${conf_file}" ] || return 0
+	conf_file="$(readlink -f "${conf_file}")" || return 1
 
 	# Quick check: if no marker exists, nothing to restore
 	grep -q "managed-by-nginx-manager" "${conf_file}" 2>/dev/null || return 0
 
-	local tmp="${conf_file}.tmp"
+	local tmp
+	tmp="$(mktemp "${conf_file}.XXXXXX")" || return 1
+	cp -p "${conf_file}" "${tmp}" || { rm -f "${tmp}"; return 1; }
 	sed 's/#managed-by-nginx-manager //g' "${conf_file}" > "${tmp}" || { rm -f "${tmp}"; return 1; }
 
 	if ! cmp -s "${conf_file}" "${tmp}"; then
@@ -1854,7 +1895,7 @@ do_test_config() {
 
 do_reload() {
 	local reload_output
-	reload_output="$(/etc/init.d/nginx reload 2>&1)"
+	reload_output="$(reload_nginx 2>&1)"
 	local reload_exit=$?
 
 	date '+%Y-%m-%d %H:%M:%S' > /tmp/nginx-manager-last-reload
@@ -1968,6 +2009,9 @@ case "$1" in
 	test)
 		test_nginx_config
 		;;
+	prepare-uci)
+		prepare_uci_config
+		;;
 	backup)
 		load_global_config
 		create_backup 1
@@ -1997,7 +2041,7 @@ case "$1" in
 		do_start
 		;;
 	*)
-		echo "Usage: $0 {generate|apply|render <section>|test|backup|sync-hosts|rotate-logs|--status|--check-env|--test-config|--reload|--restart|--start}" >&2
+		echo "Usage: $0 {generate|apply|render <section>|test|prepare-uci|backup|sync-hosts|rotate-logs|--status|--check-env|--test-config|--reload|--restart|--start}" >&2
 		exit 1
 		;;
 esac

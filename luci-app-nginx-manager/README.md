@@ -158,6 +158,10 @@ luci-base  nginx-ssl  rpcd  rpcd-mod-file  openssl-util  acme  acme-acmesh-dnsap
 3. 页面底部会出现文件编辑器，可直接编辑 `nginx.conf` 和 `uci.conf.template`
 4. 编辑后保存 — 系统自动测试，失败则回滚
 
+保存 `uci.conf.template` 时，先调用 `nginx-util` 生成运行配置，再执行 `nginx -t` 和重载；生成、检查或重载失败时恢复备份，并报告实际回滚结果。
+
+插件修改配置时保留 `/etc/nginx/uci.conf` 的符号链接。启用 Nginx UCI 配置时，如果发现旧版本将该链接替换成了带有原始生成文件标记的普通文件，会先备份到 `uci.conf.before-link-repair`，再恢复链接；不会自动替换独立编写的普通配置文件。
+
 > ⚠️ 危险编辑模式下，Core Config 页面的可视化编辑将被禁用。
 
 ## 项目结构
@@ -325,6 +329,17 @@ nginx-manager-gen --start               # 启动 nginx（JSON）
 
 - 推送 `v*` 标签触发 Release 构建
 - 也可在 Actions 页面手动触发
+
+## 回归测试
+
+在仓库根目录执行：
+
+```sh
+python3 -m unittest discover -s luci-app-nginx-manager/tests -v
+NGINX_TEST_SHELL='busybox sh' python3 -m unittest discover -s luci-app-nginx-manager/tests -v
+```
+
+测试使用临时目录和模拟命令，验证符号链接、模板生成顺序、旧版本链接修复和失败回滚，不操作本机或路由器上的 Nginx 服务。
 
 ## 许可证
 

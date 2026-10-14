@@ -2292,27 +2292,52 @@ handle_set_file_dangerous() {
 	[ -f /etc/config/nginx ] && cp -a /etc/config/nginx "${backup_path}/config-nginx"
 	[ -f "${NGINX_MANAGER_CONFIG}" ] && cp -a "${NGINX_MANAGER_CONFIG}" "${backup_path}/config-nginx-manager"
 
-	printf '%s' "${content}" > "${file_path}"
-
-	local test_output
-	test_output="$(nginx -t -c "${NGINX_CONF_PATH}" 2>&1)"
-	if [ $? -ne 0 ]; then
-		local backup_file="${backup_path}/nginx/${file_path#/etc/nginx/}"
-		if [ -f "${backup_file}" ]; then
-			cp "${backup_file}" "${file_path}"
-		fi
-		nginx -t -c "${NGINX_CONF_PATH}" >/dev/null 2>&1
-		/etc/init.d/nginx reload >/dev/null 2>&1
-
+	local backup_file="${backup_path}/nginx/${file_path#/etc/nginx/}"
+	if [ -f "${file_path}" ] && [ ! -f "${backup_file}" ]; then
 		json_init
-		json_add_string "error" "nginx -t failed after write"
-		json_add_string "detail" "${test_output}"
-		json_add_string "rolled_back" "1"
+		json_add_string "error" "failed to back up configuration"
 		json_dump
 		return
 	fi
 
-	/etc/init.d/nginx reload >/dev/null 2>&1
+	local test_output reload_output failed="0"
+	printf '%s' "${content}" > "${file_path}" || {
+		failed="1"
+		test_output="failed to write configuration"
+	}
+	# Materialize template changes before testing the active configuration.
+	# Checking the previous uci.conf could otherwise accept an invalid template.
+	if [ "${failed}" = "0" ] && [ "${file_path}" = "/etc/nginx/uci.conf.template" ]; then
+		test_output="$("${NGINX_MANAGER_GEN}" prepare-uci 2>&1)" || failed="1"
+	fi
+	if [ "${failed}" = "0" ]; then
+		test_output="$(nginx -t -c "${NGINX_CONF_PATH}" 2>&1)" || failed="1"
+	fi
+	if [ "${failed}" = "0" ]; then
+		reload_output="$(/etc/init.d/nginx reload 2>&1)" || {
+			failed="1"
+			test_output="${reload_output}"
+		}
+	fi
+	if [ "${failed}" = "1" ]; then
+		local rolled_back="0"
+		if [ -f "${backup_file}" ]; then
+			if cp "${backup_file}" "${file_path}"; then
+				if [ "${file_path}" != "/etc/nginx/uci.conf.template" ] ||
+					"${NGINX_MANAGER_GEN}" prepare-uci >/dev/null 2>&1; then
+					nginx -t -c "${NGINX_CONF_PATH}" >/dev/null 2>&1 &&
+						/etc/init.d/nginx reload >/dev/null 2>&1 && rolled_back="1"
+				fi
+			fi
+		fi
+
+		json_init
+		json_add_string "error" "configuration generation, test or reload failed after write"
+		json_add_string "detail" "${test_output}"
+		json_add_string "rolled_back" "${rolled_back}"
+		json_dump
+		return
+	fi
 
 	json_init
 	json_add_string "result" "ok"

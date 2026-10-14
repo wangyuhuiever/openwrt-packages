@@ -158,6 +158,10 @@ To directly modify nginx configuration files:
 3. A file editor will appear at the bottom of the page for editing `nginx.conf` and `uci.conf.template`
 4. Save — the system auto-tests and rolls back on failure
 
+Saving `uci.conf.template` runs `nginx-util` to render the active configuration before `nginx -t` and reload. Generation, validation or reload failures restore the backup and report whether rollback succeeded.
+
+Configuration updates preserve the `/etc/nginx/uci.conf` symlink. With Nginx UCI configuration enabled, a regular generated file left by older versions is backed up to `uci.conf.before-link-repair` before restoring the link. Independently written regular configuration files are not automatically replaced.
+
 > ⚠️ When Dangerous Edit Mode is enabled, the visual Core Config editor is disabled.
 
 ## Project Structure
@@ -325,6 +329,17 @@ This project uses GitHub Actions for automated builds:
 
 - Push a `v*` tag to trigger a Release build
 - Manual dispatch is also available from the Actions tab
+
+## Regression Tests
+
+Run from the repository root:
+
+```sh
+python3 -m unittest discover -s luci-app-nginx-manager/tests -v
+NGINX_TEST_SHELL='busybox sh' python3 -m unittest discover -s luci-app-nginx-manager/tests -v
+```
+
+The tests use temporary directories and stub commands to check symlink preservation, template rendering order, legacy link repair and failure rollback. They do not operate the host's or router's Nginx service.
 
 ## License
 
