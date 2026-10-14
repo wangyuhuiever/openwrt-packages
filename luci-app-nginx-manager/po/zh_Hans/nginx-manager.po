@@ -267,8 +267,8 @@ msgstr "发送超时"
 msgid "Send buffer size for SSL data, e.g. 4k, 8k, 16k. Leave empty for default."
 msgstr "SSL 数据发送缓冲区大小，如 4k、8k、16k。留空使用默认值。"
 
-msgid "Shared memory zone for SSL sessions, e.g. shared:SSL:10m. Leave empty for default."
-msgstr "SSL 会话的共享内存区，如 shared:SSL:10m。留空使用默认值。"
+msgid "Shared memory zone for SSL sessions, e.g. shared:SSL_MANAGER:10m. Leave empty for default."
+msgstr "SSL 会话的共享内存区，如 shared:SSL_MANAGER:10m。留空使用默认值。"
 
 msgid "Timeout for sending a request to the backend. Default: 60s."
 msgstr "向后端发送请求的超时时间。默认：60s。"

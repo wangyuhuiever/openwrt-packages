@@ -162,6 +162,8 @@ luci-base  nginx-ssl  rpcd  rpcd-mod-file  openssl-util  acme  acme-acmesh-dnsap
 
 插件修改配置时保留 `/etc/nginx/uci.conf` 的符号链接。启用 Nginx UCI 配置时，如果发现旧版本将该链接替换成了带有原始生成文件标记的普通文件，会先备份到 `uci.conf.before-link-repair`，再恢复链接；不会自动替换独立编写的普通配置文件。
 
+SSL 会话缓存默认使用 `shared:SSL_MANAGER:10m`，与 Nginx UCI 管理网页使用的 `shared:SSL:32k` 分开命名，避免同名缓存区大小冲突。安装或刷入新版时，旧默认值 `shared:SSL:10m` 会迁移到新名称，大小不变；其他自定义值保留。
+
 > ⚠️ 危险编辑模式下，Core Config 页面的可视化编辑将被禁用。
 
 ## 项目结构

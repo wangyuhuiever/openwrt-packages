@@ -162,6 +162,8 @@ Saving `uci.conf.template` runs `nginx-util` to render the active configuration 
 
 Configuration updates preserve the `/etc/nginx/uci.conf` symlink. With Nginx UCI configuration enabled, a regular generated file left by older versions is backed up to `uci.conf.before-link-repair` before restoring the link. Independently written regular configuration files are not automatically replaced.
 
+The default SSL session cache uses `shared:SSL_MANAGER:10m`, separate from nginx-ssl's `shared:SSL:32k` LuCI cache. This avoids declaring the same shared zone with different sizes after UCI rendering. Installation and first-boot migration rename the old default `shared:SSL:10m` without changing its size; other custom values are preserved.
+
 > ⚠️ When Dangerous Edit Mode is enabled, the visual Core Config editor is disabled.
 
 ## Project Structure

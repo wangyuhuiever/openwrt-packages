@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-nginx-manager
 PKG_VERSION:=1.8.5
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 PKG_LICENSE:=AGPL-3.0-only
 PKG_MAINTAINER:=yunshu
@@ -134,6 +134,10 @@ NGINX_MGR_CONF
 	}
 
 	changed=0; \
+	if [ "$$$$(uci -q get nginx_manager.global.ssl_session_cache)" = 'shared:SSL:10m' ]; then \
+		uci set nginx_manager.global.ssl_session_cache='shared:SSL_MANAGER:10m'; \
+		changed=1; \
+	fi; \
 	uci -q get nginx_manager.global.max_backups >/dev/null 2>&1 || { \
 		uci set nginx_manager.global.max_backups='20'; \
 		changed=1; \

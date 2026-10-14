@@ -79,7 +79,7 @@ return view.extend({
 		if (!custom)
 			return conflicts;
 
-		var sslSessionCache = this.formValue(options.sslSessionCache, '') || 'shared:SSL:10m';
+		var sslSessionCache = this.formValue(options.sslSessionCache, '') || 'shared:SSL_MANAGER:10m';
 		var sslStapling = this.formValue(options.sslStapling, '1');
 		var sslBufferSize = this.formValue(options.sslBufferSize, '');
 		var securityHeaders = this.formValue(options.securityHeaders, '1');
@@ -309,8 +309,8 @@ return view.extend({
 		o.rmempty = true;
 
 		o = s2.option(form.Value, 'ssl_session_cache', _('SSL Session Cache'),
-			_('Shared memory zone for SSL sessions, e.g. shared:SSL:10m. Leave empty for default.'));
-		o.placeholder = 'shared:SSL:10m';
+			_('Shared memory zone for SSL sessions, e.g. shared:SSL_MANAGER:10m. Leave empty for default.'));
+		o.placeholder = 'shared:SSL_MANAGER:10m';
 		o.rmempty = true;
 		this.customSslOptions.sslSessionCache = o;
 

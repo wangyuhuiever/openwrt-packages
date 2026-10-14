@@ -1340,7 +1340,9 @@ generate_global_conf() {
 	[ -z "${ssl_session_timeout}" ] && ssl_session_timeout="1d"
 	ssl_session_cache="$(uci -q get nginx_manager.global.ssl_session_cache)" || ssl_session_cache=""
 	local _ssl_session_cache_set="${ssl_session_cache}"
-	[ -z "${ssl_session_cache}" ] && ssl_session_cache="shared:SSL:10m"
+	# nginx-ssl UCI servers already use shared:SSL:32k. Keep the manager's
+	# cache separate; regenerated server{} directives override http{} values.
+	[ -z "${ssl_session_cache}" ] && ssl_session_cache="shared:SSL_MANAGER:10m"
 	ssl_session_tickets="$(uci -q get nginx_manager.global.ssl_session_tickets)" || ssl_session_tickets=""
 	local _ssl_session_tickets_set="${ssl_session_tickets}"
 	[ -z "${ssl_session_tickets}" ] && ssl_session_tickets="1"

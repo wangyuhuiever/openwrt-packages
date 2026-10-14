@@ -48,6 +48,8 @@ class NginxUciTests(unittest.TestCase):
 case "$*" in
   '-q get nginx.global.uci_enable') echo "${UCI_ENABLED:-true}" ;;
   '-q get nginx_manager.global.dangerous_core_edit') echo 1 ;;
+  '-q get nginx_manager.global.gzip')
+    [ -n "$GENERATE_GLOBAL_GZIP" ] || exit 1; echo "$GENERATE_GLOBAL_GZIP" ;;
   *) exit 1 ;;
 esac
 """)
@@ -154,6 +156,38 @@ json_dump() { :; }
         self.assertTrue(self.conf.is_symlink())
         self.assertIn("worker_processes 1;", self.conf.read_text())
         self.assertEqual(self.event_list(), ["render", "reload"])
+
+    def test_manager_default_cache_has_its_own_zone(self):
+        self.run_generator('mkdir -p "$BUILD_DIR"\ngenerate_global_conf',
+                           GENERATE_GLOBAL_GZIP="0")
+        generated = (self.root / "tmp/nginx-manager-build/00-global.conf").read_text()
+        self.assertIn("ssl_session_cache shared:SSL_MANAGER:10m;", generated)
+        self.assertNotIn("ssl_session_cache shared:SSL:10m;", generated)
+
+    def test_installation_migrates_only_the_old_default_cache(self):
+        defaults = (PACKAGE / "root/etc/uci-defaults/90-luci-app-nginx-manager").read_text()
+        migration = defaults.split("changed=0\n", 1)[1].split(
+            "uci -q get nginx_manager.global.max_backups", 1)[0]
+        makefile = (PACKAGE / "Makefile").read_text()
+        postinst = makefile.split("\tchanged=0; \\\n", 1)[1].split(
+            "\tuci -q get nginx_manager.global.max_backups", 1)[0]
+        postinst = postinst.replace("$$$$", "$").replace("; \\\n", "\n").replace(" \\\n", "\n")
+        for snippet in (migration, postinst):
+            for old, expected in (("shared:SSL:10m", "shared:SSL_MANAGER:10m"),
+                                  ("shared:Custom:12m", "shared:Custom:12m"), ("", "")):
+                with self.subTest(old=old, snippet=snippet):
+                    code = """
+cache="$OLD_CACHE"
+uci() {
+  case "$1" in
+    -q) printf '%s' "$cache" ;;
+    set) cache="${2#*=}" ;;
+  esac
+}
+changed=0
+""" + snippet + "\nprintf 'cache=%s\\n' \"$cache\"\n"
+                    self.assertEqual(self.run_shell(code, OLD_CACHE=old).strip(),
+                                     "cache=" + expected)
 
     def test_custom_regular_config_is_preserved(self):
         self.conf.unlink()

@@ -2081,7 +2081,7 @@ custom_ssl_directive_conflicts() {
 	[ -n "${custom_ssl_directives}" ] || return 0
 
 	ssl_session_cache="$(uci -q get nginx_manager.global.ssl_session_cache)" || ssl_session_cache=""
-	[ -z "${ssl_session_cache}" ] && ssl_session_cache="shared:SSL:10m"
+	[ -z "${ssl_session_cache}" ] && ssl_session_cache="shared:SSL_MANAGER:10m"
 	managed_zone="$(printf '%s\n' "${ssl_session_cache}" | sed -n 's/.*shared:\([^:;[:space:]]*\):\([^;[:space:]]*\).*/\1/p')"
 	managed_size="$(printf '%s\n' "${ssl_session_cache}" | sed -n 's/.*shared:\([^:;[:space:]]*\):\([^;[:space:]]*\).*/\2/p')"
 

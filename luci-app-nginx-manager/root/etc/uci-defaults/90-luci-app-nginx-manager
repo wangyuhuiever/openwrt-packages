@@ -44,6 +44,11 @@ uci -q get nginx_manager.global >/dev/null 2>&1 || {
 }
 
 changed=0
+# Older versions used the same zone name as nginx-ssl's 32k LuCI cache.
+if [ "$(uci -q get nginx_manager.global.ssl_session_cache)" = 'shared:SSL:10m' ]; then
+	uci set nginx_manager.global.ssl_session_cache='shared:SSL_MANAGER:10m'
+	changed=1
+fi
 uci -q get nginx_manager.global.max_backups >/dev/null 2>&1 || {
 	uci set nginx_manager.global.max_backups='20'
 	changed=1

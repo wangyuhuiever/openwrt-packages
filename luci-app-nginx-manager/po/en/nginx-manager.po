@@ -255,8 +255,8 @@ msgstr "Send Timeout"
 msgid "Send buffer size for SSL data, e.g. 4k, 8k, 16k. Leave empty for default."
 msgstr "Send buffer size for SSL data, e.g. 4k, 8k, 16k. Leave empty for default."
 
-msgid "Shared memory zone for SSL sessions, e.g. shared:SSL:10m. Leave empty for default."
-msgstr "Shared memory zone for SSL sessions, e.g. shared:SSL:10m. Leave empty for default."
+msgid "Shared memory zone for SSL sessions, e.g. shared:SSL_MANAGER:10m. Leave empty for default."
+msgstr "Shared memory zone for SSL sessions, e.g. shared:SSL_MANAGER:10m. Leave empty for default."
 
 msgid "Timeout for sending a request to the backend. Default: 60s."
 msgstr "Timeout for sending a request to the backend. Default: 60s."
